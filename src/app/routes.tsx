@@ -10,7 +10,7 @@ const ChatRoute = lazy(() => import("../features/chat/ChatRoute").then((module) 
 const EmergencyRoute = lazy(() => import("../features/emergency/EmergencyRoute").then((module) => ({ default: module.EmergencyRoute })));
 const FeatureRoute = lazy(() => import("../features/explore/FeatureRoute").then((module) => ({ default: module.FeatureRoute })));
 const DriverRoute = lazy(() => import("../features/home/DriverRoute").then((module) => ({ default: module.DriverRoute })));
-const LandingPlaceholder = lazy(() => import("../features/landing/LandingPlaceholder").then((module) => ({ default: module.LandingPlaceholder })));
+const SplashScreen = lazy(() => import("../features/landing/SplashScreen"));
 const OnboardingPlaceholder = lazy(() => import("../features/onboarding/OnboardingPlaceholder").then((module) => ({ default: module.OnboardingPlaceholder })));
 const PartsRoute = lazy(() => import("../features/parts/PartsRoute").then((module) => ({ default: module.PartsRoute })));
 const ProfileRoute = lazy(() => import("../features/profile/ProfileRoute").then((module) => ({ default: module.ProfileRoute })));
@@ -23,7 +23,7 @@ const load = (element: ReactNode) => <Suspense fallback={pending}>{element}</Sus
 const driver = (element: ReactNode) => <RouteGuard allowed={["driver"]}>{load(element)}</RouteGuard>;
 
 export const router = createBrowserRouter([
-  { path: "/", element: load(<LandingPlaceholder />) },
+  { path: "/", element: load(<SplashScreen />) },
   { path: "/welcome", element: load(<OnboardingPlaceholder />) },
   { path: "/signup", element: load(<AuthPlaceholder />) },
   { path: "/verify", element: load(<AuthPlaceholder />) },
