@@ -1,0 +1,10 @@
+{
+  "description": "Connects vehicle owners with verified mechanics, tow services, and parts vendors for instant roadside help, bookings, and real-time updates in Ghana.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
