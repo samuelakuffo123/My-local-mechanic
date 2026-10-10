@@ -22,7 +22,7 @@ h2 { font-size: 18px; line-height: 1.3; letter-spacing: -.02em; }
 h3 { font-size: 15px; line-height: 1.35; }
 
 .app-shell { min-height: 100vh; background: radial-gradient(circle at 50% 0%, #182657 0, #070b1a 46%); display: flex; justify-content: center; align-items: flex-start; padding: 24px; }
-.phone-frame { width: min(390px, 100%); height: min(844px, calc(100vh - 48px)); min-height: 680px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px; overflow-y: auto; overflow-x: hidden; box-shadow: var(--shadow-2); position: relative; scrollbar-width: none; }
+.phone-frame { width: min(390px, 100%); height: min(844px, calc(100vh - 48px)); min-height: 680px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px; overflow-y: auto; overflow-x: hidden; box-shadow: var(--shadow-2); position: relative; scrollbar-width: none; container-type: inline-size; container-name: phone; }
 .phone-frame::-webkit-scrollbar { display: none; }
 .status-bar { height: 28px; display: flex; padding: 9px 20px 0; align-items: center; justify-content: space-between; font-size: 10px; font-weight: 700; position: relative; z-index: 30; }
 .status-bar__icons { display: flex; gap: 7px; align-items: center; }
@@ -218,8 +218,6 @@ h3 { font-size: 15px; line-height: 1.35; }
 .state-lab > button { width: 100%; height: 42px; border: 1px solid #3a4556; background: #171b22; border-radius: 13px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font-size: 10px; font-weight: 800; cursor: pointer; }.state-lab > button span { display: flex; align-items: center; gap: 7px; }.state-lab.open > button { border-radius: 13px 13px 0 0; }.state-lab.open > button > svg { transform: rotate(180deg); }
 .state-lab > div { border: 1px solid #3a4556; border-top: 0; padding: 8px; background: #171b22; border-radius: 0 0 13px 13px; animation: popover-in 200ms var(--ease-out); }.state-lab > div > p { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .07em; padding: 3px 5px 7px; text-transform: uppercase; }.state-lab > div button { width: 100%; min-height: 34px; border: 0; border-radius: 8px; padding: 0 6px; display: flex; align-items: center; justify-content: space-between; background: transparent; color: var(--text-2); font-size: 9px; cursor: pointer; }.state-lab > div button:hover { color: var(--text); background: var(--surface-3); }
 .prototype-note { position: fixed; left: 24px; bottom: 22px; color: #505867; font-size: 8px; font-weight: 800; letter-spacing: .1em; }
-.app-shell--wide { display: block; padding: 0; background: var(--bg); }
-.phone-frame--wide { width: 100%; height: 100vh; min-height: 760px; max-width: none; border: 0; border-radius: 0; box-shadow: none; }
 .prototype-toast { position: fixed; z-index: 300; left: 50%; bottom: 22px; transform: translateX(-50%); min-height: 44px; max-width: min(420px, calc(100vw - 32px)); border: 1px solid #315f46; border-radius: 13px; background: rgba(18, 27, 22, .97); box-shadow: 0 18px 50px rgba(0, 0, 0, .42); padding: 10px 14px; display: flex; align-items: center; gap: 9px; color: #64d997; font-size: 11px; font-weight: 700; animation: popover-in 200ms var(--ease-out); }
 .prototype-toast span { color: var(--text); }
 .theme-toggle { position: fixed; z-index: 250; right: 18px; bottom: 18px; width: 46px; height: 46px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-1); color: var(--text); box-shadow: var(--shadow-1); display: grid; place-items: center; cursor: pointer; transition: transform 120ms, background-color 150ms, border-color 150ms; }
@@ -1696,12 +1694,10 @@ h3 { font-size: 15px; line-height: 1.35; }
 .device-controls { position: fixed; left: calc(50% + 215px); bottom: 24px; display: flex; gap: 8px; }
 .device-controls button { min-height: 40px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); color: var(--text); box-shadow: var(--shadow-1); display: flex; align-items: center; gap: 7px; padding: 0 12px; font-size: 12px; font-weight: 700; }
 .device-controls button:first-child { width: 40px; padding: 0; justify-content: center; }
-.device-preview--desktop .phone-frame:not(.phone-frame--wide) { width: min(960px,calc(100vw - 80px)); }
-.device-preview--desktop .device-controls { left: auto; right: 24px; }
 
 @media (min-width: 480px) {
   body { overflow: hidden; }
-  .app-shell:not(.app-shell--wide) { height: 100vh; align-items: center; }
+  .app-shell { height: 100vh; align-items: center; }
 }
 
 @media (max-width: 479px) {

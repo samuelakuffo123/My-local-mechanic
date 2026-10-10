@@ -6,5 +6,5 @@ import ProviderWorkspaces from "../provider/Workspaces";
 export function AdminRoute() {
   const navigate = useNavigate();
   const theme = useAppStore((state) => state.theme);
-  return <DeviceFrame theme={theme} workspace><ProviderWorkspaces onExit={() => navigate("/login")} role="admin" /></DeviceFrame>;
+  return <DeviceFrame theme={theme}><ProviderWorkspaces onExit={() => navigate("/login")} role="admin" /></DeviceFrame>;
 }

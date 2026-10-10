@@ -8,5 +8,5 @@ export function ProviderRoute() {
   const theme = useAppStore((state) => state.theme);
   const role = useParams().role;
   const workspace = role === "tow" || role === "vendor" ? role : "mechanic";
-  return <DeviceFrame theme={theme} workspace><ProviderWorkspaces onExit={() => navigate("/login")} role={workspace} /></DeviceFrame>;
+  return <DeviceFrame theme={theme}><ProviderWorkspaces onExit={() => navigate("/login")} role={workspace} /></DeviceFrame>;
 }
