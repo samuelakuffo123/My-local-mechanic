@@ -1,5 +1,5 @@
 import "./provider.css";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -49,11 +49,66 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import providerPhoto from "../../assets/mechanic.jpg";
+import { requestService } from "../../services/requests";
+import { adminService, type AuditLogEntry } from "../../services/admin";
+import { providerService } from "../../services/providers";
+import type { PlatformMetrics, ProviderProfile, RequestStatus, ServiceRequest } from "../../services/apiTypes";
 
 const today = new Date();
 const currentMonth = new Intl.DateTimeFormat("en-GH", { month: "long", year: "numeric", timeZone: "Africa/Accra" }).format(today).toUpperCase();
 const certificateExpiry = new Intl.DateTimeFormat("en-GH", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Accra" }).format(new Date(today.getTime() + 300 * 864e5));
 const currentYear = today.getFullYear();
+
+const statusLabels: Record<RequestStatus, string> = {
+  requested: "Requested",
+  accepted: "Accepted",
+  enRoute: "En route",
+  arrived: "Arrived",
+  diagnosing: "Diagnosing",
+  awaitingApproval: "Awaiting approval",
+  repairing: "Repairing",
+  awaitingParts: "Awaiting parts",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+const statusSlugs: Partial<Record<RequestStatus, string>> = {
+  enRoute: "en-route",
+  awaitingApproval: "awaiting-approval",
+  awaitingParts: "awaiting-parts",
+};
+
+function statusClass(status: RequestStatus) {
+  return `d-status d-status-${statusSlugs[status] ?? status.toLowerCase()}`;
+}
+
+function formatMoney(value: number) {
+  return `GHS ${value.toLocaleString("en-GH", { maximumFractionDigits: 0 })}`;
+}
+
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat("en-GH", { hour: "numeric", minute: "2-digit", timeZone: "Africa/Accra" }).format(new Date(value));
+}
+
+interface AsyncState<T> {
+  data: T;
+  loading: boolean;
+  error: string | null;
+}
+
+function useAsync<T>(load: () => Promise<T>, initial: T, deps: unknown[]): AsyncState<T> {
+  const [state, setState] = useState<AsyncState<T>>({ data: initial, loading: true, error: null });
+  const run = useCallback(load, deps);
+  useEffect(() => {
+    let active = true;
+    setState((current) => ({ ...current, loading: true, error: null }));
+    run()
+      .then((data) => { if (active) setState({ data, loading: false, error: null }); })
+      .catch((error: unknown) => { if (active) setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : "Something went wrong." })); });
+    return () => { active = false; };
+  }, [run]);
+  return state;
+}
 
 type Workspace = "mechanic" | "tow" | "vendor" | "fleet" | "admin" | "owner" | "handoff";
 type MechanicView = "overview" | "jobs" | "calendar" | "inventory";
@@ -152,19 +207,33 @@ function Sidebar({
   );
 }
 
-function EmergencyRequest() {
-  const [visible, setVisible] = useState(true);
-  if (!visible) return <div className="d-request-dismissed"><CheckCircle2 size={18} /><span>Emergency request declined. It has been offered to another provider.</span></div>;
+function EmergencyRequest({ request, onChanged }: { request: ServiceRequest | null; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!request) return null;
+
+  const respond = async (accept: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (accept) await requestService.accept(request.id);
+      else await requestService.decline(request.id, "Declined from workspace");
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not respond to the request.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <article className="d-emergency-request">
       <div className="d-request-pulse"><LifeBuoy size={21} /><span /></div>
       <div className="d-request-main">
-        <div><span>NEW EMERGENCY REQUEST</span><strong>Car won't start</strong><small>Toyota Corolla · Oxford Street, Osu</small></div>
-        <div className="d-request-customer"><span>KA</span><div><strong>Kwame Asante</strong><small>4.9 customer rating · 8 completed jobs</small></div></div>
+        <div><span>NEW {request.kind.toUpperCase()} REQUEST</span><strong>{request.problem}</strong><small>{request.location.label ?? request.region ?? "Location shared on accept"}</small></div>
+        <div className="d-request-customer"><span>MN</span><div><strong>Awaiting assignment</strong><small>{request.ref}</small></div></div>
       </div>
-      <div className="d-request-meta"><span><Navigation size={15} /><strong>2.4 km</strong><small>away</small></span><span><Clock3 size={15} /><strong>8 min</strong><small>ETA</small></span><span><Banknote size={15} /><strong>GHS 120</strong><small>call-out</small></span></div>
-      <div className="d-request-timer"><strong>00:42</strong><small>TO RESPOND</small></div>
-      <div className="d-request-actions"><DButton icon={Check} variant="success">Accept</DButton><DButton onClick={() => setVisible(false)} variant="secondary">Decline</DButton></div>
+      <div className="d-request-actions">{error && <span role="alert">{error}</span>}<DButton disabled={busy} icon={Check} onClick={() => void respond(true)} variant="success">Accept</DButton><DButton disabled={busy} onClick={() => void respond(false)} variant="secondary">Decline</DButton></div>
     </article>
   );
 }
@@ -182,17 +251,18 @@ function RevenueChart() {
   );
 }
 
-function MechanicOverview({ openJobs }: { openJobs: () => void }) {
+function MechanicOverview({ openJobs, jobs, incoming, onChanged }: { openJobs: () => void; jobs: ServiceRequest[]; incoming: ServiceRequest | null; onChanged: () => void }) {
+  const active = jobs.filter((job) => job.status !== "completed" && job.status !== "cancelled").length;
   return (
     <div className="d-page">
-      <div className="d-page-heading"><div><span className="d-kicker">MONDAY, 20 OCTOBER</span><h2>Good morning, Kojo.</h2><p>Here's what needs your attention today.</p></div><DButton icon={Plus}>Create appointment</DButton></div>
+      <div className="d-page-heading"><div><span className="d-kicker">PROVIDER WORKSPACE</span><h2>Your operations.</h2><p>Here's what needs your attention today.</p></div><DButton icon={Plus}>Create appointment</DButton></div>
       <div className="d-metric-grid">
-        <Metric detail="3 currently active" icon={Wrench} label="Today's jobs" value="8" />
-        <Metric detail="Next at 11:30 AM" icon={CalendarDays} label="Appointments" tone="violet" value="5" />
-        <Metric detail="+12.4% this week" icon={CircleDollarSign} label="Revenue today" tone="green" value="GHS 1,840" />
-        <Metric detail="From 312 reviews" icon={Star} label="Provider rating" tone="amber" value="4.9" />
+        <Metric detail={`${active} currently active`} icon={Wrench} label="Active jobs" value={String(active)} />
+        <Metric detail="Scheduled bookings" icon={CalendarDays} label="Bookings" tone="violet" value={String(jobs.filter((job) => job.kind === "booking").length)} />
+        <Metric detail="Completed jobs" icon={CircleDollarSign} label="Completed" tone="green" value={String(jobs.filter((job) => job.status === "completed").length)} />
+        <Metric detail={`${jobs.length} total requests`} icon={Star} label="All jobs" tone="amber" value={String(jobs.length)} />
       </div>
-      <EmergencyRequest />
+      <EmergencyRequest onChanged={onChanged} request={incoming} />
       <div className="d-dashboard-grid">
         <RevenueChart />
         <section className="d-performance">
@@ -203,60 +273,84 @@ function MechanicOverview({ openJobs }: { openJobs: () => void }) {
       </div>
       <section className="d-jobs-card">
         <div className="d-card-title"><div><span>TODAY'S WORK</span><h3>Active jobs</h3></div><button onClick={openJobs} type="button">View all <ArrowRight size={15} /></button></div>
-        <JobTable compact />
+        <JobTable compact jobs={jobs} />
       </section>
     </div>
   );
 }
 
 const jobStates = ["Requested", "Accepted", "En route", "Arrived", "Diagnosing", "Awaiting approval", "Repairing", "Awaiting parts", "Completed"];
+const jobStateOrder: RequestStatus[] = ["requested", "accepted", "enRoute", "arrived", "diagnosing", "awaitingApproval", "repairing", "awaitingParts", "completed"];
 
-function JobStateMachine() {
-  const [state, setState] = useState(4);
-  const next = state === 6 ? 8 : Math.min(state + 1, 8);
+function JobStateMachine({ request, onChanged }: { request: ServiceRequest | null; onChanged: () => void }) {
+  const actions = useAsync<RequestStatus[]>(() => (request ? requestService.actions(request.id) : Promise.resolve([])), [], [request?.id]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!request) {
+    return (
+      <section className="d-state-machine">
+        <div className="d-card-title"><div><span>JOB LIFECYCLE</span><h3>Valid next actions</h3></div><span className="d-live-badge"><i /> IDLE</span></div>
+        <p className="d-state-note"><ShieldCheck size={14} /> Select an active job to see its valid next actions. States cannot be skipped.</p>
+      </section>
+    );
+  }
+
+  const state = jobStateOrder.indexOf(request.status);
+  const advance = async (to: RequestStatus) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await requestService.transition(request.id, to);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update the job.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="d-state-machine">
-      <div className="d-card-title"><div><span>JOB #MN-2048 · TOYOTA COROLLA</span><h3>Valid next actions</h3></div><span className="d-live-badge"><i /> ACTIVE</span></div>
+      <div className="d-card-title"><div><span>JOB {request.ref} · {request.problem.toUpperCase()}</span><h3>Valid next actions</h3></div><span className="d-live-badge"><i /> ACTIVE</span></div>
       <div className="d-state-track">
         {jobStates.map((label, index) => (
-          <div className={index < state ? "done" : index === state ? "current" : index === 7 && state !== 6 ? "branch" : ""} key={label}>
+          <div className={index < state ? "done" : index === state ? "current" : ""} key={label}>
             <span>{index < state ? <Check size={12} /> : index + 1}</span><small>{label}</small>
           </div>
         ))}
       </div>
       <div className="d-state-action">
-        <div><span>CURRENT STATUS</span><strong>{jobStates[state]}</strong><small>{state === 4 ? "Complete diagnosis before creating an estimate." : state === 5 ? "Customer approval is required before repairs." : "Only valid next actions are enabled."}</small></div>
-        {state < 8 ? <DButton onClick={() => setState(next)}>{state === 4 ? "Create estimate" : state === 5 ? "Record customer approval" : state === 6 ? "Mark completed" : `Move to ${jobStates[next]}`}</DButton> : <span className="d-complete-chip"><CheckCircle2 size={16} /> Job completed</span>}
-        {state === 6 && <DButton onClick={() => setState(7)} variant="secondary">Awaiting parts</DButton>}
+        <div><span>CURRENT STATUS</span><strong>{statusLabels[request.status]}</strong><small>Only valid next actions are enabled. A licence plate is required before a diagnosis.</small></div>
+        {actions.loading && <span className="d-complete-chip">Checking…</span>}
+        {!actions.loading && actions.data.length === 0 && <span className="d-complete-chip"><CheckCircle2 size={16} /> No further actions</span>}
+        {!actions.loading && actions.data.map((to) => <DButton disabled={busy} key={to} onClick={() => void advance(to)}>{`Move to ${statusLabels[to]}`}</DButton>)}
       </div>
+      {error && <p role="alert">{error}</p>}
       <p className="d-state-note"><ShieldCheck size={14} /> States cannot be skipped. Cancelled is available only before repair; Disputed is available after completion.</p>
     </section>
   );
 }
 
-function JobTable({ compact = false }: { compact?: boolean }) {
-  const jobs = [
-    ["MN-2048", "Kwame Asante", "Toyota Corolla", "Diagnostics", "Diagnosing", "10:22 AM"],
-    ["MN-2041", "Ama Owusu", "Honda Civic", "Brake service", "Repairing", "9:10 AM"],
-    ["MN-2039", "Nii Laryea", "Nissan Sentra", "Battery", "Awaiting approval", "8:45 AM"],
-    ["MN-2051", "Esi Mensah", "Hyundai Elantra", "Routine service", "Accepted", "11:30 AM"],
-  ];
+function JobTable({ jobs, compact = false }: { jobs: ServiceRequest[]; compact?: boolean }) {
+  if (jobs.length === 0) return <p className="d-state-note">No jobs yet. Service requests you accept will appear here.</p>;
   return (
     <div className="d-table-wrap">
       <table className="d-table">
-        <thead><tr><th>Job</th><th>Customer & vehicle</th><th>Service</th><th>Status</th><th>Started</th><th><span className="sr-only">Actions</span></th></tr></thead>
-        <tbody>{jobs.slice(0, compact ? 3 : 4).map(([id, customer, vehicle, service, status, time]) => <tr key={id}><td><strong>{id}</strong></td><td><strong>{customer}</strong><small>{vehicle}</small></td><td>{service}</td><td><span className={`d-status d-status-${status.toLowerCase().replace(" ", "-")}`}><i />{status}</span></td><td>{time}</td><td><button aria-label={`View ${id}`} type="button" disabled><ChevronRight size={16} /></button></td></tr>)}</tbody>
+        <thead><tr><th>Job</th><th>Service</th><th>Location</th><th>Status</th><th>Updated</th><th><span className="sr-only">Actions</span></th></tr></thead>
+        <tbody>{jobs.slice(0, compact ? 3 : 8).map((job) => <tr key={job.id}><td><strong>{job.ref}</strong></td><td><strong>{job.problem}</strong><small>{job.kind}</small></td><td>{job.location.label ?? job.region ?? "—"}</td><td><span className={statusClass(job.status)}><i />{statusLabels[job.status]}</span></td><td>{formatTime(job.updatedAt)}</td><td><button aria-label={`View ${job.ref}`} type="button" disabled><ChevronRight size={16} /></button></td></tr>)}</tbody>
       </table>
     </div>
   );
 }
 
-function MechanicJobs() {
+function MechanicJobs({ jobs, onChanged }: { jobs: ServiceRequest[]; onChanged: () => void }) {
+  const active = jobs.filter((job) => job.status !== "completed" && job.status !== "cancelled");
   return (
     <div className="d-page">
       <div className="d-page-heading"><div><span className="d-kicker">JOB OPERATIONS</span><h2>Jobs</h2><p>Track work through the approved service lifecycle.</p></div><div className="d-heading-actions"><DButton icon={Filter} variant="secondary">Filter</DButton><DButton icon={Plus}>New job</DButton></div></div>
-      <JobStateMachine />
-      <section className="d-jobs-card"><div className="d-card-title"><div><span>ALL JOBS</span><h3>4 active · 12 scheduled</h3></div><div className="d-segment"><button className="active" type="button" disabled>Active</button><button type="button" disabled>Scheduled</button><button type="button" disabled>Completed</button></div></div><JobTable /></section>
+      <JobStateMachine onChanged={onChanged} request={active[0] ?? null} />
+      <section className="d-jobs-card"><div className="d-card-title"><div><span>ALL JOBS</span><h3>{active.length} active · {jobs.length} total</h3></div><div className="d-segment"><button className="active" type="button" disabled>Active</button><button type="button" disabled>Scheduled</button><button type="button" disabled>Completed</button></div></div><JobTable jobs={jobs} /></section>
     </div>
   );
 }
@@ -286,11 +380,16 @@ function MechanicInventory() {
 
 function MechanicWorkspace({ onExit }: { onExit: () => void }) {
   const [view, setView] = useState<MechanicView>("overview");
+  const [reloadKey, setReloadKey] = useState(0);
+  const requests = useAsync<ServiceRequest[]>(() => requestService.list(), [], [reloadKey]);
+  const jobs = requests.data;
+  const incoming = jobs.find((job) => job.status === "requested") ?? null;
+  const onChanged = () => setReloadKey((value) => value + 1);
   return (
     <div className="d-console">
       <Sidebar setView={setView} view={view} />
       <Topbar eyebrow="MECHANIC WORKSPACE" onExit={onExit} title={view === "overview" ? "Overview" : view === "jobs" ? "Jobs" : view === "calendar" ? "Appointments" : "Inventory"} />
-      <main className="d-main">{view === "overview" ? <MechanicOverview openJobs={() => setView("jobs")} /> : view === "jobs" ? <MechanicJobs /> : view === "calendar" ? <CalendarView /> : <MechanicInventory />}</main>
+      <main className="d-main">{view === "overview" ? <MechanicOverview incoming={incoming} jobs={jobs} onChanged={onChanged} openJobs={() => setView("jobs")} /> : view === "jobs" ? <MechanicJobs jobs={jobs} onChanged={onChanged} /> : view === "calendar" ? <CalendarView /> : <MechanicInventory />}</main>
     </div>
   );
 }
@@ -357,23 +456,50 @@ function FleetWorkspace() {
 }
 
 function AdminWorkspace() {
-  const [reviewed, setReviewed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const metrics = useAsync<PlatformMetrics | null>(() => adminService.metrics(), null, [reloadKey]);
+  const pending = useAsync<ProviderProfile[]>(() => providerService.adminList("pending"), [], [reloadKey]);
+  const audit = useAsync<AuditLogEntry[]>(() => adminService.audit(5), [], [reloadKey]);
+  const m = metrics.data;
+
+  const verify = async (id: string, decision: "verify" | "reject") => {
+    setBusy(id);
+    setError(null);
+    try {
+      await providerService.verify(id, decision);
+      setReloadKey((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update the provider.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="d-page">
       <div className="d-page-heading"><div><span className="d-kicker">PLATFORM OPERATIONS</span><h2>Admin overview</h2><p>Trust, safety, payments, and marketplace health.</p></div><DButton icon={FileText} variant="secondary">Export report</DButton></div>
-      <div className="d-admin-alert"><ShieldCheck size={19} /><span><strong>7 provider applications need review</strong><small>Oldest application has been waiting 18 hours.</small></span><button type="button" disabled>Open queue <ArrowRight size={15} /></button></div>
-      <div className="d-metric-grid"><Metric detail="+8.2% this month" icon={Users} label="Active users" value="18,420" /><Metric detail="Across 5 Ghana regions" icon={BadgeCheck} label="Verified providers" tone="green" value="1,284" /><Metric detail="Median · down 42 sec" icon={Clock3} label="Emergency response" tone="violet" value="6m 18s" /><Metric detail="+14.6% this month" icon={Banknote} label="Marketplace GMV" tone="amber" value="GHS 1.28m" /></div>
+      <div className="d-admin-alert"><ShieldCheck size={19} /><span><strong>{pending.data.length} provider application{pending.data.length === 1 ? "" : "s"} need review</strong><small>Verification decisions are recorded in the audit trail.</small></span><button type="button" disabled>Open queue <ArrowRight size={15} /></button></div>
+      <div className="d-metric-grid"><Metric detail="Registered accounts" icon={Users} label="Users" value={m ? m.users.toLocaleString("en-GH") : "—"} /><Metric detail={`${m?.providers.pending ?? 0} pending review`} icon={BadgeCheck} label="Verified providers" tone="green" value={m ? m.providers.verified.toLocaleString("en-GH") : "—"} /><Metric detail={`${m?.requests.open ?? 0} open`} icon={Clock3} label="Service requests" tone="violet" value={m ? String(m.requests.total) : "—"} /><Metric detail={`${m?.payments.paidCount ?? 0} paid`} icon={Banknote} label="Verified payments" tone="amber" value={m ? formatMoney(m.payments.paidValueGhs) : "—"} /></div>
       <div className="d-admin-grid">
         <section className="d-verification">
-          <div className="d-card-title"><div><span>PROVIDER VERIFICATION</span><h3>Application review</h3></div><span className={`d-status ${reviewed ? "d-status-repairing" : "d-status-warning"}`}><i />{reviewed ? "Verified" : "Under review"}</span></div>
-          <div className="d-applicant"><span>AA</span><div><h3>Adom Auto Services</h3><p>Mechanic · Tema Community 8</p><small>Submitted 19 Oct · Application #PV-10284</small></div><button type="button" disabled><MoreHorizontal size={18} /></button></div>
-          <div className="d-document-grid">{[["Identity document", "Ghana Card ·•• 4821", true], ["Business registration", "BN-2048821", true], ["Workshop location", "GPS verified", true], ["Insurance certificate", "Expires {certificateExpiry}", true]].map(([label, detail, checked]) => <button key={label as string} type="button" disabled><span><FileCheck2 size={18} /></span><div><strong>{label as string}</strong><small>{detail as string}</small></div>{checked && <CheckCircle2 size={17} />}</button>)}</div>
+          <div className="d-card-title"><div><span>PROVIDER VERIFICATION</span><h3>Application review</h3></div><span className={`d-status ${pending.data.length ? "d-status-warning" : "d-status-repairing"}`}><i />{pending.data.length ? "Needs review" : "Clear"}</span></div>
+          {error && <p role="alert">{error}</p>}
+          {pending.loading && <p className="d-state-note">Loading applications…</p>}
+          {!pending.loading && pending.data.length === 0 && <p className="d-state-note">No provider applications are awaiting review.</p>}
+          {pending.data.map((provider) => (
+            <div className="d-applicant" key={provider.id}>
+              <span>{provider.type.slice(0, 2).toUpperCase()}</span>
+              <div><h3>{provider.businessName}</h3><p>{provider.type} · {provider.region ?? "Region not set"}</p><small>{provider.serviceAreas.join(", ") || "No service areas listed"}</small></div>
+              <div className="d-review-actions"><DButton disabled={busy === provider.id} icon={Check} onClick={() => void verify(provider.id, "verify")} variant="success">Approve</DButton><DButton disabled={busy === provider.id} onClick={() => void verify(provider.id, "reject")} variant="danger">Reject</DButton></div>
+            </div>
+          ))}
           <div className="d-privacy-note"><ShieldCheck size={15} /> Documents are private. Access is logged in the audit trail.</div>
-          <div className="d-review-actions"><DButton disabled={reviewed} onClick={() => setReviewed(true)} icon={Check} variant="success">{reviewed ? "Provider verified" : "Approve provider"}</DButton><DButton variant="secondary">Request information</DButton><DButton variant="danger">Reject</DButton></div>
         </section>
-        <section className="d-ops-metrics"><div className="d-card-title"><div><span>TRUST & OPERATIONS</span><h3>Last 30 days</h3></div></div>{[["Emergency acceptance", "88.4%", "+2.1%", "green"], ["Median response time", "6m 18s", "-42 sec", "green"], ["Cancellation rate", "4.2%", "-0.8%", "green"], ["Payment success", "97.8%", "+0.4%", "green"], ["Open disputes", "18", "+3", "amber"]].map(([label, value, trend, tone]) => <div className="d-op-metric" key={label}><span>{label}</span><strong>{value}</strong><em className={tone}>{trend}</em></div>)}</section>
+        <section className="d-ops-metrics"><div className="d-card-title"><div><span>TRUST & OPERATIONS</span><h3>Platform totals</h3></div></div>{[["Service requests", m ? String(m.requests.total) : "—"], ["Open requests", m ? String(m.requests.open) : "—"], ["Completed", m ? String(m.requests.completed) : "—"], ["Cancelled", m ? String(m.requests.cancelled) : "—"], ["Open disputes", m ? String(m.disputes.open) : "—"]].map(([label, value]) => <div className="d-op-metric" key={label}><span>{label}</span><strong>{value}</strong></div>)}</section>
       </div>
-      <section className="d-audit"><div className="d-card-title"><div><span>AUDIT LOG</span><h3>Recent sensitive actions</h3></div><button type="button" disabled>View full log</button></div>{[["Provider PV-10279 verified", "Ama Mensah · Admin", "Today, 10:42 AM"], ["Dispute DP-882 evidence viewed", "Kofi Boateng · Trust & Safety", "Today, 9:18 AM"], ["Provider PR-204 suspended", "System · Fraud rule F-18", "Yesterday, 6:22 PM"]].map(([action, actor, time]) => <div key={action}><span><History size={16} /></span><strong>{action}</strong><small>{actor}</small><time>{time}</time></div>)}</section>
+      <section className="d-audit"><div className="d-card-title"><div><span>AUDIT LOG</span><h3>Recent sensitive actions</h3></div><button type="button" disabled>View full log</button></div>{audit.data.length === 0 && <p className="d-state-note">No audit entries yet.</p>}{audit.data.map((entry) => <div key={entry.id}><span><History size={16} /></span><strong>{entry.action.replace(/_/g, " ")}</strong><small>{entry.actorRole ?? "system"}</small><time>{formatTime(entry.createdAt)}</time></div>)}</section>
     </div>
   );
 }

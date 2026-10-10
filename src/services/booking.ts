@@ -1,14 +1,22 @@
-import { mockRequest, readPersisted, writePersisted } from "./mockApi";
-import type { User } from "../state/types";
-import { requireRole } from "./authorization";
-export interface Booking { id: string; providerId: string; vehicleId: string; startsAt: string; service: string }
-export const bookingService = {
-  list: () => mockRequest(() => readPersisted<Booking[]>("bookings", [])),
-  create: (input: Omit<Booking, "id">, user: User | null) => mockRequest(() => {
-    requireRole(user, ["driver"]);
-    const items = readPersisted<Booking[]>("bookings", []);
-    const booking = { ...input, id: crypto.randomUUID() };
-    writePersisted("bookings", [...items, booking]);
-    return booking;
-  }),
+import { requestService } from "./requests";
+import type { ServiceRequest } from "./apiTypes";
+
+// A booking is a scheduled service request (kind "booking"). Scheduling detail
+// is currently expressed through the request's problem/description until a
+// dedicated calendar/staffing model is added.
+export interface BookingService {
+  list(): Promise<ServiceRequest[]>;
+  create(input: { vehicleId: string; providerId?: string; service: string; problem: string; region?: string }): Promise<ServiceRequest>;
+}
+
+export const bookingService: BookingService = {
+  list: async () => (await requestService.list()).filter((item) => item.kind === "booking"),
+  create: async (input) =>
+    (await requestService.create({
+      vehicleId: input.vehicleId,
+      providerId: input.providerId,
+      kind: "booking",
+      problem: input.problem,
+      region: input.region,
+    })).request,
 };

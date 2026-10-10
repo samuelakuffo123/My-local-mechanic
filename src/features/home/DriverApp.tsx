@@ -62,7 +62,35 @@ import type { DriverFeatureStart } from "../explore/DriverFeatures";
 import corollaPhoto from "../../assets/corolla.jpg";
 import mechanicPhoto from "../../assets/mechanic.jpg";
 import { useAppStore } from "../../state/store";
+import { emergencyService } from "../../services/emergency";
+import { providerService } from "../../services/providers";
+import type { ProviderProfile, RequestStatus } from "../../services/apiTypes";
 import type { EmergencyStatus } from "../../state/emergencyMachine";
+
+// The emergency walkthrough is a scripted UI state machine. As it progresses we
+// mirror the meaningful stages onto a persisted service request so the job is
+// visible to providers and survives a reload. Purely presentational stages
+// (searching, results, confirming, paying) have no server equivalent and are skipped.
+const emergencyBackendMap: Partial<Record<EmergencyStatus, RequestStatus>> = {
+  requested: "requested",
+  enRoute: "enRoute",
+  arrived: "arrived",
+  diagnosing: "diagnosing",
+  awaitingApproval: "awaitingApproval",
+  repairing: "repairing",
+  awaitingParts: "awaitingParts",
+  completed: "completed",
+};
+
+function initials(name?: string | null) {
+  if (!name) return "MN";
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "MN";
+}
 
 type Screen =
   | "home"
@@ -301,6 +329,31 @@ function EmergencySlider({ onComplete }: { onComplete: () => void }) {
   );
 }
 
+function NearbyProviders({ onNavigate }: { onNavigate: (start: DriverFeatureStart) => void }) {
+  const [state, setState] = useState<{ items: ProviderProfile[]; loading: boolean }>({ items: [], loading: true });
+  useEffect(() => {
+    let active = true;
+    providerService
+      .list("emergency")
+      .then((items) => { if (active) setState({ items, loading: false }); })
+      .catch(() => { if (active) setState({ items: [], loading: false }); });
+    return () => { active = false; };
+  }, []);
+
+  if (state.loading) return <p className="text-button">Finding trusted help near you…</p>;
+  if (state.items.length === 0) return <button className="text-button" onClick={() => onNavigate("explore")} type="button">No verified providers are online right now — open the map</button>;
+  return (
+    <>
+      {state.items.slice(0, 6).map((provider) => (
+        <button key={provider.id} onClick={() => onNavigate("explore")} type="button">
+          <img alt={`${provider.businessName} mechanic`} src={mechanicPhoto} />
+          <span><small><BadgeCheck size={12} fill="currentColor" /> VERIFIED</small><strong>{provider.businessName}</strong><em><Star size={12} fill="currentColor" /> {provider.rating.toFixed(1)}</em><i><span className="live-dot" /> Available · {provider.region ?? "Ghana"}</i></span>
+        </button>
+      ))}
+    </>
+  );
+}
+
 function HomeScreen({
   onEmergency,
   onNavigate,
@@ -395,16 +448,7 @@ function HomeScreen({
             </div>
           </button>
           <div className="provider-carousel">
-            {[
-              ["Kojo AutoCare", "Osu", "4.9", "2.4 km"],
-              ["Nii's Mobile Garage", "East Legon", "4.8", "3.1 km"],
-              ["Tema Motor Works", "Tema", "4.7", "8.6 km"],
-            ].map(([name, area, rating, distance], index) => (
-              <button key={name} onClick={() => onNavigate("explore")} type="button">
-                <img alt={`${name} mechanic`} src={mechanicPhoto} />
-                <span><small><BadgeCheck size={12} fill="currentColor" /> VERIFIED</small><strong>{name}</strong><em><Star size={12} fill="currentColor" /> {rating} · {distance}</em><i><span className="live-dot" /> Open now · {area}</i></span>
-              </button>
-            ))}
+            <NearbyProviders onNavigate={onNavigate} />
           </div>
         </section>
 
@@ -538,11 +582,13 @@ function ProfilePanelSheet({
   close,
   setTheme,
   theme,
+  user,
 }: {
   panel: Exclude<ProfilePanel, null>;
   close: () => void;
   setTheme: (theme: "dark" | "light") => void;
   theme: "dark" | "light";
+  user: { name: string; phone: string; email: string } | null;
 }) {
   const [serviceUpdates, setServiceUpdates] = useState(true);
   const [reminders, setReminders] = useState(true);
@@ -596,11 +642,11 @@ function ProfilePanelSheet({
         )}
         {panel === "personal" && (
           <>
-            <div className="profile-photo-editor"><div className="avatar avatar--large">KA</div><button onClick={() => handleDemoAction("Photo updates")} type="button">Change photo</button></div>
+            <div className="profile-photo-editor"><div className="avatar avatar--large">{initials(user?.name)}</div><button onClick={() => handleDemoAction("Photo updates")} type="button">Change photo</button></div>
             <div className="profile-form">
-              <label>Full name<input defaultValue="Kwame Asante" /></label>
-              <label>Phone number<div className="profile-phone"><span>+233</span><input defaultValue="24 123 4567" /></div></label>
-              <label>Email address<input defaultValue="kwame.asante@example.com" type="email" /></label>
+              <label>Full name<input defaultValue={user?.name ?? ""} /></label>
+              <label>Phone number<div className="profile-phone"><span>+233</span><input defaultValue={(user?.phone ?? "").replace(/^\+?233/, "").trim()} /></div></label>
+              <label>Email address<input defaultValue={user?.email ?? ""} type="email" /></label>
               <label>Date of birth<input defaultValue="1991-08-14" type="date" /></label>
             </div>
             <Button onClick={() => handleDemoAction("Profile edits")}>Save changes</Button>
@@ -703,9 +749,11 @@ function ProfileScreen({
   setTheme: (theme: "dark" | "light") => void;
   theme: "dark" | "light";
 }) {
+  const navigate = useNavigate();
   const [panel, setPanel] = useState<ProfilePanel>(null);
   const user = useAppStore((state) => state.user);
   const vehicle = useAppStore((state) => state.activeVehicle);
+  const signOut = useAppStore((state) => state.signOut);
   const groups = [
     {
       label: "ACCOUNT",
@@ -739,7 +787,7 @@ function ProfileScreen({
       <AppHeader title="Profile" trailing={<IconButton icon={Settings} label="Profile settings" onClick={() => setPanel("personal")} />} />
       <main className="profile-content">
         <section className="profile-identity">
-          <div className="avatar avatar--large">KA</div>
+          <div className="avatar avatar--large">{initials(user?.name)}</div>
           <div><span className="overline">VEHICLE OWNER</span><h1>{user?.name ?? "MechNow driver"}</h1><p>{user?.phone ?? "No phone number"}</p></div>
           <button aria-label="Edit personal information" onClick={() => setPanel("personal")} type="button"><ChevronRight size={19} /></button>
         </section>
@@ -766,11 +814,11 @@ function ProfileScreen({
             </div>
           </section>
         ))}
-        <button className="profile-signout" onClick={() => { window.location.href = "/login"; }} type="button"><LogOut size={18} /> Sign out</button>
+        <button className="profile-signout" onClick={() => { void signOut().then(() => navigate("/login")); }} type="button"><LogOut size={18} /> Sign out</button>
         <p className="profile-version">MechNow for Ghana · Version 1.0 Demo</p>
       </main>
       <BottomNav active="Profile" onEmergency={onEmergency} onHome={onHome} onNavigate={onNavigate} onProfile={() => undefined} />
-      {panel && <ProfilePanelSheet close={() => setPanel(null)} panel={panel} setTheme={setTheme} theme={theme} />}
+      {panel && <ProfilePanelSheet close={() => setPanel(null)} panel={panel} setTheme={setTheme} theme={theme} user={user} />}
     </div>
   );
 }
@@ -1356,14 +1404,38 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
   const theme = useAppStore((state) => state.theme);
   const setTheme = useAppStore((state) => state.setTheme);
   const emergencyRequest = useAppStore((state) => state.emergencyRequest);
+  const vehicle = useAppStore((state) => state.activeVehicle);
   const startEmergency = useAppStore((state) => state.startEmergency);
   const transitionRequest = useAppStore((state) => state.transitionEmergency);
   const clearEmergency = useAppStore((state) => state.clearEmergency);
+  const backendRequestId = useRef<string | null>(null);
 
   const beginEmergency = () => {
     if (emergencyRequest && ["reviewed", "cancelled"].includes(emergencyRequest.status)) clearEmergency();
     if (!emergencyRequest || ["reviewed", "cancelled"].includes(emergencyRequest.status)) startEmergency();
+    backendRequestId.current = null;
     navigate("/app/emergency/problem");
+  };
+
+  const syncEmergency = async (statuses: EmergencyStatus[]) => {
+    try {
+      if (!backendRequestId.current) {
+        if (!statuses.includes("requested") || !vehicle) return;
+        const request = await emergencyService.submit({
+          vehicleId: vehicle.id,
+          problem: selectedProblem || "Emergency assistance requested",
+          location: { label: "Oxford Street, Osu" },
+        });
+        backendRequestId.current = request.id;
+        return;
+      }
+      for (const status of statuses) {
+        const mapped = emergencyBackendMap[status];
+        if (mapped) await emergencyService.progress(backendRequestId.current, mapped);
+      }
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const advanceEmergency = (statuses: EmergencyStatus[], nextScreen: Screen) => {
@@ -1373,6 +1445,7 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
     } catch (error) {
       console.error(error);
     }
+    void syncEmergency(statuses);
   };
 
   const openDriverFeatures = (start: DriverFeatureStart) => {

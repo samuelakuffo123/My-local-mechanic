@@ -1,5 +1,5 @@
 import "./explore.css";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -48,6 +48,11 @@ import mechanicPhoto from "../../assets/mechanic.jpg";
 import partsPhoto from "../../assets/brake.jpg";
 import tirePhoto from "../../assets/tyre.jpg";
 import towPhoto from "../../assets/tow.jpg";
+import { useAppStore } from "../../state/store";
+import { bookingService } from "../../services/booking";
+import { towService } from "../../services/tow";
+import { vehicleService, type ServiceHistoryItem } from "../../services/vehicles";
+import type { Vehicle } from "../../services/apiTypes";
 
 const today = new Date();
 const vehicleYear = today.getFullYear() - 4;
@@ -58,6 +63,42 @@ const historyYear = today.getFullYear();
 const historyDate = new Intl.DateTimeFormat("en-GH", { day: "numeric", month: "long", year: "numeric", timeZone: "Africa/Accra" }).format(new Date(today.getTime() - 45 * 864e5));
 const insuranceDate = new Intl.DateTimeFormat("en-GH", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Accra" }).format(new Date(today.getTime() + 180 * 864e5));
 const roadworthyDate = new Intl.DateTimeFormat("en-GH", { day: "numeric", month: "long", year: "numeric", timeZone: "Africa/Accra" }).format(new Date(today.getTime() + 41 * 864e5));
+
+function vehicleLabel(vehicle: Vehicle) {
+  return `${vehicle.make} ${vehicle.model}`;
+}
+
+function vehicleMeta(vehicle: Vehicle) {
+  return `${vehicle.year} · ${vehicle.plate}`;
+}
+
+function formatMoney(value: number) {
+  return `GHS ${value.toLocaleString("en-GH", { maximumFractionDigits: 0 })}`;
+}
+
+function formatDay(value: string) {
+  return new Intl.DateTimeFormat("en-GH", { day: "numeric", month: "short", timeZone: "Africa/Accra" }).format(new Date(value)).toUpperCase();
+}
+
+interface AsyncState<T> {
+  data: T;
+  loading: boolean;
+  error: string | null;
+}
+
+function useAsyncData<T>(load: () => Promise<T>, initial: T, deps: unknown[]): AsyncState<T> {
+  const [state, setState] = useState<AsyncState<T>>({ data: initial, loading: true, error: null });
+  const run = useCallback(load, deps);
+  useEffect(() => {
+    let active = true;
+    setState((current) => ({ ...current, loading: true, error: null }));
+    run()
+      .then((data) => { if (active) setState({ data, loading: false, error: null }); })
+      .catch((error: unknown) => { if (active) setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : "Something went wrong." })); });
+    return () => { active = false; };
+  }, [run]);
+  return state;
+}
 
 export type DriverFeatureStart = "hub" | "explore" | "booking" | "vehicles" | "tow" | "parts" | "chat";
 type Page =
@@ -260,24 +301,50 @@ function Profile({ go, back }: { go: (page: Page) => void; back: () => void }) {
   );
 }
 
-function Booking({ go, back }: { go: (page: Page) => void; back: () => void }) {
+function Booking({ vehicle, go, back }: { vehicle: Vehicle | null; go: (page: Page) => void; back: () => void }) {
   const [step, setStep] = useState(1);
   const [service, setService] = useState("Vehicle diagnostics");
   const [slot, setSlot] = useState("");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const titles = ["Choose a service", "Choose your vehicle", "Pick a date & time", "Add details", "Review booking"];
+
+  const confirm = async () => {
+    if (!vehicle) {
+      setError("Add a vehicle before booking a service.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await bookingService.create({
+        vehicleId: vehicle.id,
+        service,
+        problem: [service, notes.trim()].filter(Boolean).join(" — "),
+      });
+      go("booking-confirmed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the booking.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="s2-screen">
       <Header eyebrow={`STEP ${step} OF 5`} onBack={() => step === 1 ? back() : setStep(step - 1)} title={titles[step - 1]} />
       <div className="s2-progress"><span style={{ width: `${step * 20}%` }} /></div>
       <main className="s2-booking">
         {step === 1 && <div className="s2-choice-list">{[["Vehicle diagnostics", "Find the cause of a warning or issue", "GHS 120"], ["Brake inspection", "Full braking system safety check", "GHS 90"], ["Routine service", "Oil, filters and 20-point inspection", "GHS 450"], ["Battery service", "Test, charge or replacement", "GHS 80"]].map(([name, copy, price]) => <button className={service === name ? "selected" : ""} key={name} onClick={() => setService(name)} type="button"><span className="s2-choice-icon"><Wrench size={19} /></span><span><strong>{name}</strong><small>{copy}</small></span><span><strong>From {price}</strong><i>{service === name && <Check size={13} />}</i></span></button>)}</div>}
-        {step === 2 && <div className="s2-vehicle-choice"><span className="s2-kicker">SELECT A VEHICLE</span><button className="selected" type="button" disabled><span className="s2-car-visual"><Car size={40} /></span><span><strong>Toyota Corolla</strong><small>{vehicleSummary}</small><em>PRIMARY</em></span><i><Check size={14} /></i></button><button type="button" disabled><Plus size={18} /> Add another vehicle</button></div>}
+        {step === 2 && <div className="s2-vehicle-choice"><span className="s2-kicker">SELECT A VEHICLE</span>{vehicle ? <button className="selected" type="button" disabled><span className="s2-car-visual"><Car size={40} /></span><span><strong>{vehicleLabel(vehicle)}</strong><small>{vehicleMeta(vehicle)}</small>{vehicle.primary && <em>PRIMARY</em>}</span><i><Check size={14} /></i></button> : <p className="s2-page-copy">No vehicle on file. Add a vehicle from My vehicles before booking.</p>}<button onClick={() => go("vehicles")} type="button"><Plus size={18} /> Manage vehicles</button></div>}
         {step === 3 && <div className="s2-date-time"><span className="s2-kicker">{bookingMonth} · GMT</span><div className="s2-date-row">{[["FRI", "17"], ["SAT", "18"], ["SUN", "19"], ["MON", "20"], ["TUE", "21"]].map(([day, date], i) => <button className={i === 1 ? "selected" : i === 2 ? "disabled" : ""} disabled={i === 2} key={date} type="button"><span>{day}</span><strong>{date}</strong>{i === 2 && <small>Closed</small>}</button>)}</div><h2>Available times</h2><div className="s2-time-grid">{["9:00 AM", "10:30 AM", "12:00 PM", "2:30 PM", "3:30 PM", "5:00 PM"].map((time, i) => <button className={slot === time ? "selected" : i === 1 ? "booked" : ""} disabled={i === 1} key={time} onClick={() => setSlot(time)} type="button">{time}{i === 1 && <small>Booked</small>}</button>)}</div><div className="s2-timezone"><Clock3 size={15} /> Times shown in Africa/Accra (GMT)</div></div>}
-        {step === 4 && <div className="s2-notes"><label htmlFor="booking-notes">Describe what you've noticed</label><textarea id="booking-notes" placeholder="For example: The warning light came on yesterday and the car feels slow to start." /><button type="button" disabled><Camera size={20} /><span><strong>Add photos</strong><small>Help the mechanic prepare before your visit</small></span><Plus size={18} /></button><div className="s2-calm-note"><ShieldCheck size={17} /><span>Your notes and photos are only shared with Kojo AutoCare.</span></div></div>}
-        {step === 5 && <div className="s2-review"><section><div className="s2-provider-avatar">KA</div><span><strong>Kojo AutoCare</strong><small><BadgeCheck size={12} fill="currentColor" /> Verified provider</small></span></section><dl><div><dt>Service</dt><dd>{service}</dd></div><div><dt>Vehicle</dt><dd>Toyota Corolla · {vehicleYear}</dd></div><div><dt>Date</dt><dd>Saturday, 18 October</dd></div><div><dt>Time</dt><dd>{slot || "2:30 PM"} GMT</dd></div><div><dt>Estimated total</dt><dd>From GHS 120</dd></div></dl><div className="s2-policy"><FileText size={17} /><span><strong>Free cancellation until 12:30 PM</strong><small>Late cancellations may incur a GHS 30 fee.</small></span></div></div>}
+        {step === 4 && <div className="s2-notes"><label htmlFor="booking-notes">Describe what you've noticed</label><textarea id="booking-notes" onChange={(e) => setNotes(e.target.value)} placeholder="For example: The warning light came on yesterday and the car feels slow to start." value={notes} /><button type="button" disabled><Camera size={20} /><span><strong>Add photos</strong><small>Help the mechanic prepare before your visit</small></span><Plus size={18} /></button><div className="s2-calm-note"><ShieldCheck size={17} /><span>Your notes and photos are only shared with Kojo AutoCare.</span></div></div>}
+        {step === 5 && <div className="s2-review"><section><div className="s2-provider-avatar">MN</div><span><strong>Matched on confirmation</strong><small><BadgeCheck size={12} fill="currentColor" /> Verified provider</small></span></section><dl><div><dt>Service</dt><dd>{service}</dd></div><div><dt>Vehicle</dt><dd>{vehicle ? `${vehicleLabel(vehicle)} · ${vehicle.year}` : "No vehicle selected"}</dd></div><div><dt>Date</dt><dd>Saturday, 18 October</dd></div><div><dt>Time</dt><dd>{slot || "2:30 PM"} GMT</dd></div><div><dt>Estimated total</dt><dd>From GHS 120</dd></div></dl><div className="s2-policy"><FileText size={17} /><span><strong>Free cancellation until 12:30 PM</strong><small>Late cancellations may incur a GHS 30 fee.</small></span></div></div>}
       </main>
       <div className="s2-sticky">
-        <SButton disabled={step === 3 && !slot} onClick={() => step === 5 ? go("booking-confirmed") : setStep(step + 1)}>{step === 5 ? "Confirm booking" : "Continue"}</SButton>
+        {error && <p role="alert">{error}</p>}
+        <SButton disabled={(step === 3 && !slot) || submitting} onClick={() => (step === 5 ? void confirm() : setStep(step + 1))}>{step === 5 ? (submitting ? "Creating…" : "Confirm booking") : "Continue"}</SButton>
       </div>
     </div>
   );
@@ -291,29 +358,101 @@ function BookingConfirmed({ go }: { go: (page: Page) => void }) {
   );
 }
 
-function Vehicles({ go, back }: { go: (page: Page) => void; back: () => void }) {
+function Vehicles({ vehicle, go, back, onChanged }: { vehicle: Vehicle | null; go: (page: Page) => void; back: () => void; onChanged: () => void }) {
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ make: "", model: "", year: String(today.getFullYear()), plate: "", mileageKm: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!form.make.trim() || !form.model.trim() || !form.plate.trim()) {
+      setError("Make, model and plate are required.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await vehicleService.create({ make: form.make.trim(), model: form.model.trim(), year: Number(form.year) || today.getFullYear(), plate: form.plate.trim().toUpperCase(), mileageKm: Number(form.mileageKm) || 0, primary: !vehicle });
+      setAdding(false);
+      setForm({ make: "", model: "", year: String(today.getFullYear()), plate: "", mileageKm: "" });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save vehicle.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (adding) {
+    return (
+      <div className="s2-screen">
+        <Header onBack={() => setAdding(false)} title="Add a vehicle" />
+        <main className="s2-notes">
+          <form onSubmit={submit}>
+            <label htmlFor="v-make">Make</label>
+            <input id="v-make" onChange={(e) => setForm({ ...form, make: e.target.value })} placeholder="Toyota" value={form.make} />
+            <label htmlFor="v-model">Model</label>
+            <input id="v-model" onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="Corolla" value={form.model} />
+            <label htmlFor="v-year">Year</label>
+            <input id="v-year" onChange={(e) => setForm({ ...form, year: e.target.value })} type="number" value={form.year} />
+            <label htmlFor="v-plate">Plate</label>
+            <input id="v-plate" onChange={(e) => setForm({ ...form, plate: e.target.value })} placeholder="GR 8241-22" value={form.plate} />
+            <label htmlFor="v-mileage">Mileage (km)</label>
+            <input id="v-mileage" onChange={(e) => setForm({ ...form, mileageKm: e.target.value })} placeholder="42000" type="number" value={form.mileageKm} />
+            {error && <p role="alert">{error}</p>}
+            <button className="s2-button s2-button--primary" disabled={saving} type="submit"><span>{saving ? "Saving…" : "Save vehicle"}</span></button>
+          </form>
+        </main>
+      </div>
+    );
+  }
+
+  if (!vehicle) {
+    return (
+      <div className="s2-screen">
+        <Header action={<button aria-label="Add vehicle" onClick={() => setAdding(true)} type="button"><Plus size={20} /></button>} onBack={back} title="My vehicles" />
+        <main className="s2-vehicles">
+          <section className="s2-tab-placeholder"><Car size={40} /><h2>No vehicles yet</h2><p>Add your vehicle to book services, view history and get maintenance reminders.</p><button className="s2-button s2-button--primary" onClick={() => setAdding(true)} type="button"><span><Plus size={18} /> Add a vehicle</span></button></section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="s2-screen">
-      <Header action={<button aria-label="Add vehicle" onClick={() => go("history")} type="button"><Plus size={20} /></button>} onBack={back} title="My vehicles" />
+      <Header action={<button aria-label="Add vehicle" onClick={() => setAdding(true)} type="button"><Plus size={20} /></button>} onBack={back} title="My vehicles" />
       <main className="s2-vehicles">
-        <section className="s2-vehicle-hero"><div className="s2-vehicle-top"><span>PRIMARY VEHICLE</span><button type="button" onClick={() => go("reminders")}>Edit</button></div><div className="s2-car-display"><Car size={72} strokeWidth={1.2} /><span /></div><h1>Toyota Corolla</h1><p>{vehicleYear} LE · GR 8241-22</p><div className="s2-health-row"><span><CheckCircle2 size={16} /> Vehicle health</span><strong>Good</strong></div></section>
-        <div className="s2-mileage"><Gauge size={20} /><span><small>CURRENT MILEAGE</small><strong>42,180 km</strong></span><button type="button" onClick={() => go("reminders")}>Update</button></div>
-        <div className="s2-vehicle-metrics"><button onClick={() => go("reminders")} type="button"><span className="s2-tone-amber"><Clock3 size={19} /></span><strong>2 reminders</strong><small>Next in 1,820 km</small><ArrowRight size={15} /></button><button onClick={() => go("history")} type="button"><span className="s2-tone-blue"><History size={19} /></span><strong>8 records</strong><small>Last service 12 Aug</small><ArrowRight size={15} /></button></div>
-        <section className="s2-documents"><div className="s2-section-title"><h2>Documents & renewals</h2><button type="button" onClick={() => go("history")}>View all</button></div><button type="button" onClick={() => go("history-detail")}><span className="s2-tone-green"><ShieldCheck size={18} /></span><span><strong>Insurance</strong><small>Valid until {insuranceDate}</small></span><em>ACTIVE</em></button><button type="button" onClick={() => go("history-detail")}><span className="s2-tone-amber"><FileText size={18} /></span><span><strong>Roadworthy certificate</strong><small>Renews in 41 days</small></span><em className="due">DUE SOON</em></button></section>
-        <button className="s2-add-vehicle" onClick={() => go("history")} type="button"><Plus size={18} /> Add another vehicle</button>
+        <section className="s2-vehicle-hero"><div className="s2-vehicle-top"><span>{vehicle.primary ? "PRIMARY VEHICLE" : "VEHICLE"}</span><button type="button" onClick={() => setAdding(true)}>Add</button></div><div className="s2-car-display"><Car size={72} strokeWidth={1.2} /><span /></div><h1>{vehicleLabel(vehicle)}</h1><p>{vehicleMeta(vehicle)}</p><div className="s2-health-row"><span><CheckCircle2 size={16} /> Vehicle health</span><strong>Registered</strong></div></section>
+        <div className="s2-mileage"><Gauge size={20} /><span><small>CURRENT MILEAGE</small><strong>{vehicle.mileageKm.toLocaleString("en-GH")} km</strong></span><button type="button" onClick={() => go("reminders")}>View</button></div>
+        <div className="s2-vehicle-metrics"><button onClick={() => go("reminders")} type="button"><span className="s2-tone-amber"><Clock3 size={19} /></span><strong>Reminders</strong><small>Maintenance schedule</small><ArrowRight size={15} /></button><button onClick={() => go("history")} type="button"><span className="s2-tone-blue"><History size={19} /></span><strong>Service records</strong><small>Completed jobs</small><ArrowRight size={15} /></button></div>
+        <section className="s2-documents"><div className="s2-section-title"><h2>Documents & renewals</h2><button type="button" onClick={() => go("history")}>View all</button></div><button type="button" onClick={() => go("history-detail")}><span className="s2-tone-green"><ShieldCheck size={18} /></span><span><strong>Insurance</strong><small>Add or update your policy</small></span><em>ACTIVE</em></button><button type="button" onClick={() => go("history-detail")}><span className="s2-tone-amber"><FileText size={18} /></span><span><strong>Roadworthy certificate</strong><small>Renews in 41 days</small></span><em className="due">DUE SOON</em></button></section>
+        <button className="s2-add-vehicle" onClick={() => setAdding(true)} type="button"><Plus size={18} /> Add another vehicle</button>
       </main>
     </div>
   );
 }
 
-function HistoryList({ go, back }: { go: (page: Page) => void; back: () => void }) {
+function HistoryList({ items, loading, go, back }: { items: ServiceHistoryItem[]; loading: boolean; go: (page: Page) => void; back: () => void }) {
+  const total = items.reduce((sum, item) => sum + (item.payment?.amountGhs ?? item.approvedEstimate?.totalGhs ?? 0), 0);
   return (
     <div className="s2-screen">
       <Header onBack={back} title="Service history" />
       <main className="s2-history">
-        <div className="s2-history-summary"><span><strong>8</strong><small>SERVICE RECORDS</small></span><span><strong>GHS 4,280</strong><small>TOTAL MAINTENANCE</small></span></div>
+        <div className="s2-history-summary"><span><strong>{items.length}</strong><small>SERVICE RECORDS</small></span><span><strong>{formatMoney(total)}</strong><small>TOTAL MAINTENANCE</small></span></div>
         <div className="s2-year"><span>{historyYear}</span><i /></div>
-        {[["12 AUG", "Routine service", "Kojo AutoCare", "GHS 450", "42,180 km"], ["04 MAY", "Front brake pads", "AutoHaus Accra", "GHS 920", "38,640 km"], ["19 JAN", "Wheel alignment", "Precision Tyres", "GHS 180", "33,205 km"]].map(([date, service, provider, price, km], i) => <button key={date} onClick={() => i === 0 && go("history-detail")} type="button"><span className="s2-history-date">{date}</span><span><strong>{service}</strong><small>{provider}</small><em><ShieldCheck size={11} /> Provider-added, locked</em></span><span><strong>{price}</strong><small>{km}</small><ChevronRight size={15} /></span></button>)}
+        {loading && <p className="s2-history-empty">Loading service records…</p>}
+        {!loading && items.length === 0 && <p className="s2-history-empty">No completed services yet. Provider records appear here after a job is closed.</p>}
+        {!loading && items.map((item) => {
+          const price = item.payment?.amountGhs ?? item.approvedEstimate?.totalGhs ?? 0;
+          return (
+            <button key={item.request.id} onClick={() => go("history-detail")} type="button">
+              <span className="s2-history-date">{formatDay(item.request.completedAt ?? item.request.updatedAt)}</span>
+              <span><strong>{item.request.problem}</strong><small>{item.request.provider?.businessName ?? "Assigned provider"}</small><em><ShieldCheck size={11} /> Provider-added, locked</em></span>
+              <span><strong>{price ? formatMoney(price) : "—"}</strong><small>{item.request.ref}</small><ChevronRight size={15} /></span>
+            </button>
+          );
+        })}
       </main>
     </div>
   );
@@ -365,12 +504,32 @@ function Tow({ go, back }: { go: (page: Page) => void; back: () => void }) {
   );
 }
 
-function TowEstimate({ go, back }: { go: (page: Page) => void; back: () => void }) {
+function TowEstimate({ vehicle, go, back }: { vehicle: Vehicle | null; go: (page: Page) => void; back: () => void }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const request = async () => {
+    if (!vehicle) {
+      setError("Add a vehicle before requesting a tow.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await towService.request({ vehicleId: vehicle.id, problem: "Vehicle breakdown — tow requested", location: { label: "Oxford Street, Osu" } });
+      go("tow-tracking");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not request a tow.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="s2-screen">
       <Header onBack={back} title="Tow estimate" />
       <main className="s2-tow-estimate"><span className="s2-kicker">UPFRONT PRICE</span><h1>GHS 320</h1><p>Includes dispatch, loading and 6.8 km transport.</p><section><div><Truck size={20} /><span><small>ARRIVAL</small><strong>12–18 minutes</strong></span></div><div><Navigation size={20} /><span><small>DISTANCE</small><strong>6.8 km</strong></span></div><div><Car size={20} /><span><small>TOW TYPE</small><strong>Flatbed</strong></span></div></section><div className="s2-price-breakdown"><h2>Price details</h2><div><span>Base dispatch</span><strong>GHS 180</strong></div><div><span>Distance · 6.8 km</span><strong>GHS 140</strong></div><div><span>Total</span><strong>GHS 320</strong></div></div><div className="s2-calm-note"><ShieldCheck size={17} /><span>This price won't change unless your route or vehicle details change.</span></div></main>
-      <div className="s2-sticky"><SButton onClick={() => go("tow-tracking")}>Confirm & request tow</SButton><p>No charge until an operator accepts.</p></div>
+      <div className="s2-sticky">{error && <p role="alert">{error}</p>}<SButton disabled={submitting} onClick={() => void request()}>{submitting ? "Requesting…" : "Confirm & request tow"}</SButton><p>No charge until an operator accepts.</p></div>
     </div>
   );
 }
@@ -486,7 +645,23 @@ function Thread({ back }: { back: () => void }) {
 }
 
 export default function DriverFeatures({ start = "hub", onExit }: { start?: DriverFeatureStart; onExit: () => void }) {
+  const activeVehicle = useAppStore((state) => state.activeVehicle);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [stack, setStack] = useState<Page[]>([start]);
+
+  const refreshVehicles = useCallback(async () => {
+    try {
+      setVehicles(await vehicleService.list());
+    } catch {
+      // The vehicle list is best-effort; screens fall back to an empty state.
+    }
+  }, []);
+
+  useEffect(() => { void refreshVehicles(); }, [refreshVehicles]);
+
+  const currentVehicle = activeVehicle ?? vehicles[0] ?? null;
+  const history = useAsyncData<ServiceHistoryItem[]>(() => (currentVehicle ? vehicleService.history(currentVehicle.id) : Promise.resolve([])), [], [currentVehicle?.id]);
+
   const page = stack[stack.length - 1];
   const go = (next: Page) => setStack((current) => [...current, next]);
   const back = () => stack.length > 1 ? setStack((current) => current.slice(0, -1)) : onExit();
@@ -495,14 +670,14 @@ export default function DriverFeatures({ start = "hub", onExit }: { start?: Driv
       case "hub": return <ModuleHub go={go} onExit={onExit} />;
       case "explore": return <Explore back={back} go={go} />;
       case "profile": return <Profile back={back} go={go} />;
-      case "booking": return <Booking back={back} go={go} />;
+      case "booking": return <Booking back={back} go={go} vehicle={currentVehicle} />;
       case "booking-confirmed": return <BookingConfirmed go={go} />;
-      case "vehicles": return <Vehicles back={back} go={go} />;
-      case "history": return <HistoryList back={back} go={go} />;
+      case "vehicles": return <Vehicles back={back} go={go} onChanged={refreshVehicles} vehicle={currentVehicle} />;
+      case "history": return <HistoryList back={back} go={go} items={history.data} loading={history.loading} />;
       case "history-detail": return <HistoryDetail back={back} />;
       case "reminders": return <Reminders back={back} />;
       case "tow": return <Tow back={back} go={go} />;
-      case "tow-estimate": return <TowEstimate back={back} go={go} />;
+      case "tow-estimate": return <TowEstimate back={back} go={go} vehicle={currentVehicle} />;
       case "tow-tracking": return <TowTracking go={go} />;
       case "tow-receipt": return <TowReceipt go={go} />;
       case "parts": return <Marketplace back={back} go={go} />;
@@ -514,6 +689,6 @@ export default function DriverFeatures({ start = "hub", onExit }: { start?: Driv
       case "thread": return <Thread back={back} />;
       default: return <ModuleHub go={go} onExit={onExit} />;
     }
-  }, [page, stack.length]);
+  }, [page, stack.length, currentVehicle, history.data, history.loading, refreshVehicles]);
   return view;
 }
