@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, CircleAlert, CreditCard, History, Wrench } from "lucide-react";
 import { Link } from "react-router";
 import { AppLayout } from "../../components/AppLayout";
-import { bookingService, type Booking } from "../../services/booking";
+import { bookingService } from "../../services/booking";
 import { emergencyService } from "../../services/emergency";
 import { paymentService, type Payment } from "../../services/payments";
-import type { EmergencyRequest } from "../../state/emergencyMachine";
+import type { RequestStatus } from "../../services/apiTypes";
 import { useAppStore } from "../../state/store";
 
 type ActivityItem = {
@@ -24,13 +24,12 @@ function formatDate(value: string) {
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-function getEmergencyState(status: EmergencyRequest["status"]) {
-  if (status === "completed" || status === "paid" || status === "reviewed") return "Completed";
-  if (status === "paying") return "Payment intent pending · not charged";
+function getEmergencyState(status: RequestStatus) {
+  if (status === "completed") return "Completed";
   if (status === "cancelled") return "Cancelled";
   if (status === "requested") return "Saved · not dispatched";
-  if (status === "matched" || status === "enRoute" || status === "nearby" || status === "arrived") return "Provider update";
-  if (status === "noProvider" || status === "offline") return "Needs attention";
+  if (status === "accepted" || status === "enRoute" || status === "arrived") return "Provider update";
+  if (status === "awaitingApproval" || status === "awaitingParts") return "Needs attention";
   return "In progress";
 }
 
@@ -43,16 +42,16 @@ export function ActivityRoute() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([bookingService.list(), paymentService.list(), emergencyService.resume()])
+    Promise.all([bookingService.list(), paymentService.list(), emergencyService.active()])
       .then(([bookings, payments, emergency]) => {
         if (!active) return;
         const activity: ActivityItem[] = [
-          ...bookings.map((booking: Booking) => ({
+          ...bookings.map((booking) => ({
             id: `booking-${booking.id}`,
-            title: booking.service || "Service booking",
-            detail: "The provider has not been notified. Your appointment is not confirmed.",
-            date: booking.startsAt,
-            state: "Request saved · not confirmed",
+            title: booking.problem || "Service booking",
+            detail: `Booking request · ${booking.status}`,
+            date: booking.createdAt,
+            state: booking.status,
             kind: "booking" as const,
           })),
           ...payments.map((payment: Payment) => ({

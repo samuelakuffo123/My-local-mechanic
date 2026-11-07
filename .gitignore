@@ -5,6 +5,7 @@ data/*.sqlite*
 .cache/
 .env*
 .vite/
+.data/
 vite.config.*.timestamp-*
 *.tsbuildinfo
 *-debug.log*

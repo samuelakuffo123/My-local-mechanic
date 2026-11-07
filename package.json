@@ -9,7 +9,9 @@
     "test:api": "node --test server/api.test.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "server": "node server/index.ts",
+    "server:test": "node --test \"server/tests/**/*.test.ts\""
   },
   "dependencies": {
     "lucide-react": "^1.52.0",

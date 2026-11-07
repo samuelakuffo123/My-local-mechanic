@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 import { RouterProvider } from "react-router";
-import { ApiError } from "../services/api";
-import { authService } from "../services/auth";
 import { useAppStore } from "../state/store";
 import { router } from "./routes";
 import SplashScreen from "../features/splash/SplashScreen";
@@ -10,26 +8,22 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [splashComplete, setSplashComplete] = useState(false);
   const [error, setError] = useState("");
+  const hydrate = useAppStore((state) => state.hydrate);
+  const storeReady = useAppStore((state) => state.ready);
 
   async function restoreSession() {
     setError("");
     try {
-      const user = await authService.me();
-      useAppStore.getState().signIn(user);
+      await hydrate();
       setReady(true);
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 401) {
-        useAppStore.getState().signOut();
-        setReady(true);
-        return;
-      }
       setError(cause instanceof Error ? cause.message : "The API session could not be restored.");
     }
   }
 
   useEffect(() => {
     void restoreSession();
-  }, []);
+  }, [hydrate]);
 
   if (error) {
     return (
@@ -39,7 +33,7 @@ export default function App() {
       </main>
     );
   }
-  if (!ready || !splashComplete) {
+  if (!ready || !storeReady || !splashComplete) {
     return <SplashScreen onComplete={() => setSplashComplete(true)} />;
   }
   return <RouterProvider router={router} />;

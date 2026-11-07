@@ -1,9 +1,22 @@
-import { apiRequest } from "./api";
-import type { User } from "../state/types";
+import { requestService } from "./requests";
+import type { ServiceRequest } from "./apiTypes";
 
-export interface Booking { id: string; providerId: string; vehicleId: string; startsAt: string; service: string }
-export const bookingService = {
-  list: () => apiRequest<Booking[]>("/bookings"),
-  create: (input: Omit<Booking, "id">, _user: User | null) =>
-    apiRequest<Booking>("/bookings", { method: "POST", body: input }),
+// A booking is a scheduled service request (kind "booking"). Scheduling detail
+// is currently expressed through the request's problem/description until a
+// dedicated calendar/staffing model is added.
+export interface BookingService {
+  list(): Promise<ServiceRequest[]>;
+  create(input: { vehicleId: string; providerId?: string; service: string; problem: string; region?: string }): Promise<ServiceRequest>;
+}
+
+export const bookingService: BookingService = {
+  list: async () => (await requestService.list()).filter((item) => item.kind === "booking"),
+  create: async (input) =>
+    (await requestService.create({
+      vehicleId: input.vehicleId,
+      providerId: input.providerId,
+      kind: "booking",
+      problem: input.problem,
+      region: input.region,
+    })).request,
 };
