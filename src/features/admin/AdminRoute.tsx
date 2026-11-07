@@ -1,10 +1,10 @@
 import { useNavigate } from "react-router";
-import { DeviceFrame } from "../../components/DeviceFrame";
+import { AppLayout } from "../../components/AppLayout";
 import { useAppStore } from "../../state/store";
 import ProviderWorkspaces from "../provider/Workspaces";
 
 export function AdminRoute() {
   const navigate = useNavigate();
   const theme = useAppStore((state) => state.theme);
-  return <DeviceFrame theme={theme} workspace><ProviderWorkspaces onExit={() => navigate("/login")} role="admin" /></DeviceFrame>;
+  return <AppLayout theme={theme} workspace><ProviderWorkspaces onExit={() => navigate("/login")} role="admin" /></AppLayout>;
 }

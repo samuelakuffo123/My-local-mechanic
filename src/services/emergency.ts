@@ -1,13 +1,11 @@
-import { mockRequest, readPersisted, writePersisted } from "./mockApi";
+import { apiRequest } from "./api";
 import type { EmergencyRequest } from "../state/emergencyMachine";
 import type { User } from "../state/types";
-import { requireRole } from "./authorization";
 
 export const emergencyService = {
-  save: (request: EmergencyRequest, user: User | null) => mockRequest(() => {
-    requireRole(user, ["driver"]);
-    return writePersisted("emergency", request);
-  }, { failureRate: .06 }),
-  resume: () => mockRequest(() => readPersisted<EmergencyRequest | null>("emergency", null), { failureRate: 0 }),
-  cancel: (request: EmergencyRequest) => mockRequest(() => writePersisted("emergency", { ...request, status: "cancelled" as const })),
+  save: (request: EmergencyRequest, _user: User | null) =>
+    apiRequest<EmergencyRequest>("/emergency", { method: "PUT", body: request }),
+  resume: () => apiRequest<EmergencyRequest | null>("/emergency"),
+  cancel: (request: EmergencyRequest) =>
+    apiRequest<EmergencyRequest>("/emergency/cancel", { method: "POST", body: { id: request.id } }),
 };

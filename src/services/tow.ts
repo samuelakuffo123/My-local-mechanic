@@ -1,5 +1,8 @@
-import { mockRequest } from "./mockApi";
+import { apiRequest } from "./api";
 export const towService = {
   estimate: (distanceKm: number, type: "flatbed" | "wheel-lift" | "standard") =>
-    mockRequest(() => ({ distanceKm, type, totalGhs: Math.round(160 + distanceKm * (type === "flatbed" ? 24 : 18)), etaMinutes: 12 })),
+    apiRequest<{ distanceKm: number; type: string; totalGhs: number; etaMinutes: number }>("/tow/estimate", {
+      method: "POST",
+      body: { distanceKm, type },
+    }),
 };

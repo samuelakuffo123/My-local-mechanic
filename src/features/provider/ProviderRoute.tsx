@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "react-router";
-import { DeviceFrame } from "../../components/DeviceFrame";
+import { AppLayout } from "../../components/AppLayout";
 import { useAppStore } from "../../state/store";
 import ProviderWorkspaces from "./Workspaces";
 
@@ -8,5 +8,5 @@ export function ProviderRoute() {
   const theme = useAppStore((state) => state.theme);
   const role = useParams().role;
   const workspace = role === "tow" || role === "vendor" ? role : "mechanic";
-  return <DeviceFrame theme={theme} workspace><ProviderWorkspaces onExit={() => navigate("/login")} role={workspace} /></DeviceFrame>;
+  return <AppLayout theme={theme} workspace><ProviderWorkspaces onExit={() => navigate("/login")} role={workspace} /></AppLayout>;
 }

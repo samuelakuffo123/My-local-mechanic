@@ -27,7 +27,7 @@ export interface EmergencyRequest {
   id: string;
   status: EmergencyStatus;
   problem?: string;
-  location?: { label: string; lat: number; lng: number };
+  location?: { label: string; lat?: number; lng?: number };
   providerId?: string;
   createdAt: string;
   updatedAt: string;
@@ -36,9 +36,9 @@ export interface EmergencyRequest {
 const transitions: Record<EmergencyStatus, EmergencyStatus[]> = {
   idle: ["choosingProblem"],
   choosingProblem: ["locating", "cancelled"],
-  locating: ["searching", "offline", "cancelled"],
-  searching: ["results", "noProvider", "offline", "cancelled"],
-  results: ["confirming", "searching", "cancelled"],
+  locating: ["choosingProblem", "searching", "offline", "cancelled"],
+  searching: ["locating", "results", "noProvider", "offline", "cancelled"],
+  results: ["confirming", "locating", "searching", "cancelled"],
   confirming: ["requested", "results", "offline", "cancelled"],
   requested: ["providerDeclined", "matched", "noProvider", "offline", "cancelled"],
   providerDeclined: ["searching", "matched", "noProvider", "cancelled"],

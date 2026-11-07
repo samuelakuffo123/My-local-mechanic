@@ -1,16 +1,19 @@
 {
-  "name": "figma-make-app",
+  "name": "my-local-mechanic",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "api": "node server/api.mjs",
+    "test:api": "node --test server/api.test.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt"
   },
   "dependencies": {
     "lucide-react": "^1.52.0",
+    "mapbox-gl": "^3.34.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^7.18.4",

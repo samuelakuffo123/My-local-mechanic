@@ -127,7 +127,7 @@ function Sidebar({
   ];
   return (
     <aside className="d-sidebar">
-      <div className="d-brand"><span><Navigation size={17} fill="currentColor" /></span><strong>mechnow</strong><em>PRO</em></div>
+      <div className="d-brand"><span><Navigation size={17} fill="currentColor" /></span><strong>My Local Mechanic</strong><em>PRO</em></div>
       <nav>
         <span>WORKSPACE</span>
         {items.map(({ view: itemView, label, icon: Icon, badge }) => (
@@ -384,7 +384,7 @@ function OwnerDesktop() {
   return (
     <div className="d-owner">
       <aside className="d-owner-sidebar">
-        <div className="d-brand"><span><Navigation size={17} fill="currentColor" /></span><strong>mechnow</strong></div>
+        <div className="d-brand"><span><Navigation size={17} fill="currentColor" /></span><strong>My Local Mechanic</strong></div>
         <nav>{[["Overview", LayoutDashboard], ["Vehicles", Car], ["Find help", MapPin], ["Appointments", CalendarDays], ["Service history", History], ["Parts", ShoppingBag], ["Messages", MessageCircle], ["Payments", Banknote], ["Settings", Settings]].map(([label, Icon], i) => { const ItemIcon = Icon as LucideIcon; return <button className={i === 2 ? "active" : ""} key={label as string} type="button" disabled><ItemIcon size={18} />{label as string}</button>; })}</nav>
         <button className="d-owner-emergency" type="button" disabled><LifeBuoy size={19} /><span><strong>Emergency help</strong><small>Get roadside assistance</small></span></button>
       </aside>
@@ -431,7 +431,7 @@ export default function ProviderWorkspaces({ onExit, role = "mechanic" }: { onEx
     if (workspace === "owner") return <OwnerDesktop />;
     return (
       <div className="d-simple-console">
-        <div className="d-simple-sidebar"><div className="d-brand"><span><Navigation size={17} fill="currentColor" /></span><strong>mechnow</strong></div><nav><button className="active" type="button" disabled><LayoutDashboard size={18} />Overview</button><button type="button" disabled><History size={18} />Activity</button><button type="button" disabled><MessageCircle size={18} />Messages</button><button type="button" disabled><Settings size={18} />Settings</button></nav></div>
+        <div className="d-simple-sidebar"><div className="d-brand"><span><Navigation size={17} fill="currentColor" /></span><strong>My Local Mechanic</strong></div><nav><button className="active" type="button" disabled><LayoutDashboard size={18} />Overview</button><button type="button" disabled><History size={18} />Activity</button><button type="button" disabled><MessageCircle size={18} />Messages</button><button type="button" disabled><Settings size={18} />Settings</button></nav></div>
         <Topbar eyebrow={`${workspace.toUpperCase()} WORKSPACE`} onExit={onExit} title={workspace === "tow" ? "Tow operations" : workspace === "vendor" ? "Store operations" : workspace === "fleet" ? "Fleet health" : workspace === "admin" ? "Admin overview" : "Handoff & QA"} />
         <main className="d-main">{workspace === "tow" ? <TowOperator /> : workspace === "vendor" ? <VendorWorkspace /> : workspace === "fleet" ? <FleetWorkspace /> : workspace === "admin" ? <AdminWorkspace /> : <HandoffWorkspace />}</main>
       </div>
