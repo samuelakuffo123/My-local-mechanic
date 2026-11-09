@@ -214,7 +214,7 @@ function Brand() {
   return (
     <div className="brand" aria-label="MechNow">
       <span className="brand__mark">
-        <Navigation size={15} fill="currentColor" strokeWidth={2} />
+        <img alt="" src="/brand-mark.png" />
       </span>
       <span>mechnow</span>
     </div>

@@ -13,6 +13,12 @@ npm run dev
 
 The API listens on `127.0.0.1:3001`; Vite proxies `/api` requests to it. SQLite data is stored in `data/mechnow.sqlite` by default. Override `DATABASE_PATH` or `API_PORT` as needed.
 
+## Install on a phone
+
+The production client is an installable Progressive Web App (PWA). Deploy it to a public HTTPS origin, then open the site on your phone. On Android, use the browser's **Install app** or **Add to Home screen** option. On iPhone, open the site in Safari and choose **Share → Add to Home Screen**. The app shell and static assets are cached for launching the interface offline; API-backed actions still need the API and an internet connection. Service-worker updates are applied by the browser.
+
+The frontend must be served from the site root because its manifest and service worker use `/` paths. Configure the production `/api` route to proxy to the Node API, and keep the API database on persistent storage. The current SQLite API and development OTP/SMS setup are not a production hosting/auth solution by themselves.
+
 ## Mapbox pickup maps
 
 Copy `env.example` to `.env.local` and set `VITE_MAPBOX_ACCESS_TOKEN` to a Mapbox **public** access token beginning with `pk.`. Restart Vite after changing the file. The pickup step uses Mapbox GL JS for an interactive map, forward address search, reverse geocoding, and a movable pickup pin. Search is limited to Ghana.
