@@ -69,6 +69,7 @@ import type { ProviderProfile, RequestStatus, ServiceRequest } from "../../servi
 import type { EmergencyStatus } from "../../state/emergencyMachine";
 import { LiveMap } from "../../components/LiveMap";
 import { useGeolocation, type GeoPoint } from "../../hooks/useGeolocation";
+import { getDrivingRoute } from "../../services/directions";
 
 // The emergency walkthrough is a scripted UI state machine. As it progresses we
 // mirror the meaningful stages onto a persisted service request so the job is
@@ -1079,33 +1080,46 @@ function HoldToConfirm({ onComplete }: { onComplete: () => void }) {
   );
 }
 
-function ConfirmScreen({ onBack, onConfirm }: { onBack: () => void; onConfirm: () => void }) {
+function ConfirmScreen({
+  onBack,
+  onConfirm,
+  problem,
+  locationLabel,
+  vehicle,
+}: {
+  onBack: () => void;
+  onConfirm: () => void;
+  problem: string;
+  locationLabel: string;
+  vehicle: { make: string; model: string; plate: string } | null;
+}) {
+  const vehicleLabel = vehicle ? `${vehicle.make} ${vehicle.model} · ${vehicle.plate}` : "No vehicle selected";
   return (
     <div className="screen">
       <AppHeader onBack={onBack} title="Confirm request" />
       <main className="flow-content confirm-content">
         <div className="provider-hero">
-          <div className="provider-avatar provider-avatar--large">KA</div>
-          <span className="verified-chip"><ShieldCheck size={14} fill="currentColor" /> VERIFIED PROVIDER</span>
-          <h1>Kojo AutoCare</h1>
-          <p><Star size={15} fill="currentColor" /> 4.9 · 312 completed jobs</p>
+          <div className="provider-avatar provider-avatar--large">MN</div>
+          <span className="verified-chip"><ShieldCheck size={14} fill="currentColor" /> REQUEST DETAILS</span>
+          <h1>Confirm your help request</h1>
+          <p>We'll share these details with nearby verified providers.</p>
         </div>
         <section className="eta-panel">
           <span className="eta-panel__icon"><Navigation size={22} fill="currentColor" /></span>
-          <div><span>ESTIMATED ARRIVAL</span><strong>8–10 min</strong><small>2.4 km away · Available now</small></div>
+          <div><span>LIVE LOCATION</span><strong>Ready to share</strong><small>{locationLabel}</small></div>
           <span className="live-dot" />
         </section>
         <section className="request-details">
           <h2>Request details</h2>
           <dl>
-            <div><dt><CircleAlert size={17} /> Problem</dt><dd>Car won't start</dd></div>
-            <div><dt><Car size={17} /> Vehicle</dt><dd>Toyota Corolla · GR 8241-22</dd></div>
-            <div><dt><MapPin size={17} /> Location</dt><dd>Oxford Street, Osu</dd></div>
+            <div><dt><CircleAlert size={17} /> Problem</dt><dd>{problem || "Emergency assistance requested"}</dd></div>
+            <div><dt><Car size={17} /> Vehicle</dt><dd>{vehicleLabel}</dd></div>
+            <div><dt><MapPin size={17} /> Location</dt><dd>{locationLabel}</dd></div>
           </dl>
         </section>
         <section className="price-panel">
-          <div><span>Call-out fee</span><strong>GHS 120</strong></div>
-          <p>Covers arrival and diagnosis. Any repair cost will be shared for your approval before work starts.</p>
+          <div><span>Pricing</span><strong>Shown before approval</strong></div>
+          <p>Any call-out, diagnosis, or repair cost must be confirmed before you approve payment.</p>
         </section>
         <div className="assurance-row"><ShieldCheck size={18} /><span><strong>No surprise charges</strong><small>Price changes always need your approval.</small></span></div>
       </main>
@@ -1172,6 +1186,8 @@ function TrackingScreen({
   onScenario,
   request,
   userLocation,
+  providerLocation,
+  route,
   error,
   onRefresh,
 }: {
@@ -1179,6 +1195,8 @@ function TrackingScreen({
   onScenario: (value: Scenario) => void;
   request: ServiceRequest | null;
   userLocation: GeoPoint | null;
+  providerLocation: { lat: number; lng: number } | null;
+  route: Array<[number, number]> | null;
   error: string | null;
   onRefresh: () => void;
 }) {
@@ -1206,7 +1224,9 @@ function TrackingScreen({
       <div className="tracking-map">
         <LiveMap
           user={userLocation ? { lat: userLocation.lat, lng: userLocation.lng, label: userLocation.label ?? "You", kind: "user" } : null}
+          provider={providerLocation ? { lat: providerLocation.lat, lng: providerLocation.lng, label: "Provider", kind: "provider" } : null}
           destination={request?.location.lat != null && request?.location.lng != null ? { lat: request.location.lat, lng: request.location.lng, label: request.location.label, kind: "destination" } : null}
+          route={route}
           height={335}
           followUser
         />
@@ -1456,6 +1476,8 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
   const [requestLocation, setRequestLocation] = useState<GeoPoint | null>(null);
   const [liveRequest, setLiveRequest] = useState<ServiceRequest | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [routeCoords, setRouteCoords] = useState<Array<[number, number]> | null>(null);
+  const [providerPoint, setProviderPoint] = useState<{ lat: number; lng: number } | null>(null);
   const geo = useGeolocation({ immediate: false, watch: screen === "tracking" || screen === "location" || screen === "searching" || screen === "sent" });
   const theme = useAppStore((state) => state.theme);
   const setTheme = useAppStore((state) => state.setTheme);
@@ -1472,8 +1494,34 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
     backendRequestId.current = null;
     setLiveRequest(null);
     setTrackingError(null);
+    setRouteCoords(null);
+    setProviderPoint(null);
     navigate("/app/emergency/problem");
   };
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const items = await requestService.list();
+        const current = items.find((item) => item.kind === "emergency" && item.status !== "completed" && item.status !== "cancelled");
+        if (!active || !current) return;
+        backendRequestId.current = current.id;
+        setLiveRequest(current);
+        if (current.location.lat != null && current.location.lng != null) {
+          setRequestLocation({
+            lat: current.location.lat,
+            lng: current.location.lng,
+            label: current.location.label ?? "Current location",
+            updatedAt: Date.now(),
+          });
+        }
+      } catch {
+        // Best effort: live tracking can still start from a new request.
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (geo.point) {
@@ -1560,6 +1608,58 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
     };
   }, [screen]);
 
+  useEffect(() => {
+    const target = requestLocation ?? (liveRequest?.location.lat != null && liveRequest?.location.lng != null ? { lat: liveRequest.location.lat, lng: liveRequest.location.lng } : null);
+    if (!target || screen !== "tracking") {
+      setRouteCoords(null);
+      setProviderPoint(null);
+      return;
+    }
+    const offset = 0.012;
+    const start = { lat: target.lat + offset, lng: target.lng - offset };
+    const status = liveRequest?.status ?? "requested";
+    if (status === "arrived" || status === "diagnosing" || status === "awaitingApproval" || status === "repairing" || status === "awaitingParts" || status === "completed") {
+      setProviderPoint({ lat: target.lat, lng: target.lng });
+      setRouteCoords([[start.lng, start.lat], [target.lng, target.lat]]);
+      return;
+    }
+    let active = true;
+    void getDrivingRoute(start, target).then((route) => {
+      if (!active) return;
+      const fallback: Array<[number, number]> = [[start.lng, start.lat], [target.lng, target.lat]];
+      const coords: Array<[number, number]> = route?.coordinates?.length ? route.coordinates : fallback;
+      setRouteCoords(coords);
+      const idx = Math.min(coords.length - 1, Math.max(0, Math.floor(coords.length * 0.35)));
+      setProviderPoint({ lat: coords[idx][1], lng: coords[idx][0] });
+    });
+    return () => { active = false; };
+  }, [liveRequest?.location.lat, liveRequest?.location.lng, liveRequest?.status, requestLocation, screen]);
+
+  useEffect(() => {
+    if (screen !== "tracking" || !routeCoords || routeCoords.length < 2) return;
+    const status = liveRequest?.status ?? "requested";
+    if (["arrived", "diagnosing", "awaitingApproval", "repairing", "awaitingParts", "completed", "cancelled"].includes(status)) return;
+    let index = Math.min(routeCoords.length - 2, Math.max(0, Math.floor(routeCoords.length * 0.35)));
+    const timer = window.setInterval(() => {
+      index = Math.min(routeCoords.length - 1, index + 1);
+      const point = routeCoords[index];
+      setProviderPoint({ lat: point[1], lng: point[0] });
+      if (index >= routeCoords.length - 1) window.clearInterval(timer);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [liveRequest?.status, routeCoords, screen]);
+
+  const cancelActiveRequest = async () => {
+    const id = backendRequestId.current;
+    try {
+      if (id) await emergencyService.cancel(id, "Cancelled by customer");
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setScenario("cancelled");
+    }
+  };
+
   const openDriverFeatures = (start: DriverFeatureStart) => {
     const routes: Record<DriverFeatureStart, string> = {
       hub: "/app/services",
@@ -1598,9 +1698,9 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       case "location": return <LocationScreen onBack={() => setScreen("need")} onContinue={() => { if (geo.point) setRequestLocation({ ...geo.point, label: geo.point.label ?? "Current location" }); advanceEmergency(["searching"], "searching"); }} onDenied={() => setScenario("location-denied")} location={requestLocation ?? geo.point} loading={geo.loading} error={geo.error} onRefresh={() => geo.request()} />;
       case "searching": return <SearchingScreen onCancel={() => { setScreen("home"); setSelectedProblem(""); }} onFound={() => advanceEmergency(["results"], "results")} />;
       case "results": return <ProviderResults onBack={() => setScreen("location")} onSelect={() => advanceEmergency(["confirming"], "confirm")} />;
-      case "confirm": return <ConfirmScreen onBack={() => setScreen("results")} onConfirm={() => advanceEmergency(["requested"], "sent")} />;
+      case "confirm": return <ConfirmScreen onBack={() => setScreen("results")} onConfirm={() => advanceEmergency(["requested"], "sent")} problem={selectedProblem} locationLabel={(requestLocation ?? geo.point)?.label ?? "Current location"} vehicle={vehicle} />;
       case "sent": return <SentScreen onContinue={() => advanceEmergency(["matched", "enRoute"], "tracking")} />;
-      case "tracking": return <TrackingScreen onArrived={() => advanceEmergency(["nearby", "arrived"], "arrived")} onScenario={setScenario} request={liveRequest} userLocation={requestLocation ?? geo.point} error={trackingError} onRefresh={() => { const id = backendRequestId.current; if (id) void requestService.get(id).then(setLiveRequest).catch((e) => setTrackingError(e instanceof Error ? e.message : "Could not refresh tracking.")); }} />;
+      case "tracking": return <TrackingScreen onArrived={() => advanceEmergency(["nearby", "arrived"], "arrived")} onScenario={(s) => { if (s === "cancelled") { void cancelActiveRequest(); } else { setScenario(s); } }} request={liveRequest} userLocation={requestLocation ?? geo.point} providerLocation={providerPoint} route={routeCoords} error={trackingError} onRefresh={() => { const id = backendRequestId.current; if (id) void requestService.get(id).then(setLiveRequest).catch((e) => setTrackingError(e instanceof Error ? e.message : "Could not refresh tracking.")); }} />;
       case "arrived": return <ArrivedScreen onEstimate={() => advanceEmergency(["diagnosing", "awaitingApproval"], "estimate")} />;
       case "estimate": return <EstimateScreen onApprove={() => advanceEmergency(["repairing", "completed", "paying"], "payment")} onBack={() => setScreen("arrived")} />;
       case "payment": return <PaymentScreen onPaid={() => advanceEmergency(["paid"], "rating")} />;
@@ -1608,7 +1708,7 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       case "complete": return <CompleteScreen onHome={() => setScreen("home")} />;
       default: return null;
     }
-  }, [emergencyRequest, geo.error, geo.loading, geo.point, liveRequest, navigate, requestLocation, scenario, screen, selectedProblem, theme, trackingError]);
+  }, [emergencyRequest, geo.error, geo.loading, geo.point, liveRequest, navigate, providerPoint, requestLocation, routeCoords, scenario, screen, selectedProblem, theme, trackingError, vehicle]);
 
   return content;
 }

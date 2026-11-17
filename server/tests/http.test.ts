@@ -111,6 +111,35 @@ test("HTTP boundary: routing, auth, ownership and response shapes", async () => 
     const idor = await call(`/api/vehicles/${created.json.id as string}`, { token: otherToken });
     assert.equal(idor.status, 403, "vehicles are scoped to their owner");
 
+    // --- Live request locations are persisted and stay scoped ----------------
+    const createdRequest = await call("/api/service-requests", {
+      token,
+      body: {
+        vehicleId: created.json.id,
+        kind: "emergency",
+        problem: "Car will not start",
+        location: { label: "Oxford Street, Osu", lat: 5.6037, lng: -0.187 },
+      },
+    });
+    assert.equal(createdRequest.status, 200);
+    const requestId = (createdRequest.json.request as { id: string }).id;
+
+    const moved = await call(`/api/service-requests/${requestId}/location`, {
+      token,
+      body: { label: "Ring Road, Accra", lat: 5.61, lng: -0.2 },
+    });
+    assert.equal(moved.status, 200);
+    const movedLocation = moved.json.location as { label: string | null; lat: number | null; lng: number | null };
+    assert.equal(movedLocation.lat, 5.61, "latitude survives a location update");
+    assert.equal(movedLocation.lng, -0.2, "longitude survives a location update");
+    assert.equal(movedLocation.label, "Ring Road, Accra");
+
+    const foreignMove = await call(`/api/service-requests/${requestId}/location`, {
+      token: otherToken,
+      body: { lat: 0, lng: 0 },
+    });
+    assert.equal(foreignMove.status, 403, "another customer cannot move someone else's request");
+
     // --- Provider credentials stay private -----------------------------------
     const adminId = seed.ensureUser({ phone: "0200000000", name: "Root Admin", role: "admin", password: "admin-password-123" });
     const adminLogin = await call("/api/auth/login", { body: { phone: "0200000000", password: "admin-password-123" } });

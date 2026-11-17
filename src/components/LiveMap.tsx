@@ -13,6 +13,7 @@ interface LiveMapProps {
   user?: MapPoint | null;
   provider?: MapPoint | null;
   destination?: MapPoint | null;
+  route?: Array<[number, number]> | null; // [lng, lat]
   followUser?: boolean;
   interactive?: boolean;
   className?: string;
@@ -34,7 +35,7 @@ function markerEl(kind: NonNullable<MapPoint["kind"]>) {
   return el;
 }
 
-export function LiveMap({ user, provider, destination, followUser = true, interactive = true, className = "", height = "100%" }: LiveMapProps) {
+export function LiveMap({ user, provider, destination, route = null, followUser = true, interactive = true, className = "", height = "100%" }: LiveMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<{ user?: mapboxgl.Marker; provider?: mapboxgl.Marker; destination?: mapboxgl.Marker }>({});
@@ -61,6 +62,13 @@ export function LiveMap({ user, provider, destination, followUser = true, intera
       interactive,
     });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    map.on("load", () => {
+      if (!map.getSource("route-line")) {
+        map.addSource("route-line", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [] } } });
+        map.addLayer({ id: "route-line-casing", type: "line", source: "route-line", paint: { "line-color": "#1e3a8a", "line-width": 7, "line-opacity": 0.35 } });
+        map.addLayer({ id: "route-line", type: "line", source: "route-line", paint: { "line-color": "#2f6bff", "line-width": 4, "line-opacity": 0.9 } });
+      }
+    });
     mapRef.current = map;
     return () => {
       Object.values(markersRef.current).forEach((marker) => marker?.remove());
@@ -103,6 +111,22 @@ export function LiveMap({ user, provider, destination, followUser = true, intera
     map.fitBounds(bounds, { padding: 56, maxZoom: 15, duration: 700 });
     fittedRef.current = true;
   }, [followUser, points]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const applyRoute = () => {
+      const source = map.getSource("route-line") as mapboxgl.GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: route && route.length > 1 ? route : [] },
+      });
+    };
+    if (map.isStyleLoaded()) applyRoute();
+    else map.once("load", applyRoute);
+  }, [route]);
 
   if (!TOKEN) {
     return (
