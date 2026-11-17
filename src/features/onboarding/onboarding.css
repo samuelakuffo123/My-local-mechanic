@@ -15,7 +15,7 @@
   --onboarding-accent: #1949b8;
   --onboarding-accent-strong: #2458d8;
   --onboarding-line: rgba(25, 73, 184, .16);
-  --onboarding-tint: rgba(36, 88, 216, .09);
+  --onboarding-tint: transparent;
 }
 
 .onboarding-header {
