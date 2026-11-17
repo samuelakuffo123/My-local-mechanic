@@ -16,6 +16,8 @@ export interface RequestContext {
   params: Record<string, string>;
   query: URLSearchParams;
   body: unknown;
+  /** Exact request bytes, needed for gateway signature verification. */
+  rawBody: string;
   auth: AuthContext | null;
   ip: string;
 }
@@ -50,7 +52,13 @@ function matchRoute(method: string, path: string): { route: Route; params: Recor
     for (let index = 0; index < route.segments.length; index += 1) {
       const segment = route.segments[index];
       if (segment.startsWith(":")) {
-        params[segment.slice(1)] = decodeURIComponent(parts[index]);
+        // decodeURIComponent throws on malformed escapes such as "%E0%A4%A".
+        // Turn that into a 400 instead of an unhandled rejection.
+        try {
+          params[segment.slice(1)] = decodeURIComponent(parts[index]);
+        } catch {
+          throw new AppError("Malformed request path.", 400, "bad_request");
+        }
       } else if (segment !== parts[index]) {
         matched = false;
         break;
@@ -74,7 +82,7 @@ function applyCors(res: ServerResponse, origin: string | undefined) {
 
 const MAX_BODY_BYTES = 256 * 1024;
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+async function readBody(req: IncomingMessage): Promise<{ body: unknown; raw: string }> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -82,11 +90,11 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
     if (size > MAX_BODY_BYTES) throw new AppError("Request body too large.", 413, "payload_too_large");
     chunks.push(chunk as Buffer);
   }
-  if (chunks.length === 0) return null;
+  if (chunks.length === 0) return { body: null, raw: "" };
   const raw = Buffer.concat(chunks).toString("utf8");
-  if (!raw.trim()) return null;
+  if (!raw.trim()) return { body: null, raw };
   try {
-    return JSON.parse(raw);
+    return { body: JSON.parse(raw), raw };
   } catch {
     throw new AppError("Request body must be valid JSON.", 400, "invalid_json");
   }
@@ -98,24 +106,29 @@ export interface ServerHooks {
 
 export function createRequestHandler(hooks: ServerHooks) {
   return async function handler(req: IncomingMessage, res: ServerResponse) {
-    const origin = req.headers.origin;
-    applyCors(res, origin);
-    if (req.method === "OPTIONS") {
-      res.statusCode = 204;
-      res.end();
-      return;
-    }
-
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const method = req.method ?? "GET";
-    const routeMatch = matchRoute(method, url.pathname);
-
-    res.setHeader("X-Content-Type-Options", "nosniff");
-
     try {
+      const origin = req.headers.origin;
+      applyCors(res, origin);
+      if (req.method === "OPTIONS") {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      if (config.env === "production") {
+        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+      }
+
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      const method = req.method ?? "GET";
+      // Inside the try: a malformed path must never escape as a rejection.
+      const routeMatch = matchRoute(method, url.pathname);
+
       const token = extractToken(req);
       const auth = token ? hooks.authenticate(token) : null;
-      const body = method === "GET" || method === "DELETE" ? null : await readBody(req);
+      const parsed = method === "GET" || method === "DELETE" ? { body: null, raw: "" } : await readBody(req);
+      const body = parsed.body;
 
       if (!routeMatch) {
         throw new AppError("No such endpoint.", 404, "not_found");
@@ -132,6 +145,7 @@ export function createRequestHandler(hooks: ServerHooks) {
         params: routeMatch.params,
         query: url.searchParams,
         body,
+        rawBody: parsed.raw,
         auth,
         ip: clientIp(req),
       };
@@ -139,6 +153,11 @@ export function createRequestHandler(hooks: ServerHooks) {
       const result = await routeMatch.route.handler(context);
       sendJson(res, result === undefined ? 204 : 200, result);
     } catch (error) {
+      // A failure after the response started can no longer be reported as JSON.
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
       if (error instanceof AppError) {
         sendJson(res, error.status, { error: { code: error.code, message: error.message, details: error.details } });
       } else {
@@ -158,8 +177,15 @@ export function extractToken(req: IncomingMessage): string | null {
 }
 
 export function clientIp(req: IncomingMessage): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) return forwarded.split(",")[0].trim();
+  // X-Forwarded-For is client-controlled unless a trusted proxy sets it, so it is
+  // only honoured when TRUST_PROXY=true (set it when running behind nginx/Cloudflare).
+  if (config.trustProxy) {
+    const forwarded = req.headers["x-forwarded-for"];
+    if (typeof forwarded === "string" && forwarded.length > 0) {
+      const first = forwarded.split(",")[0].trim();
+      if (first) return first;
+    }
+  }
   return req.socket.remoteAddress ?? "unknown";
 }
 

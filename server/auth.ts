@@ -31,6 +31,12 @@ interface UserRow {
 
 const SELF_SERVE_ROLES: Role[] = ["driver", "mechanic", "tow", "vendor"];
 
+// Bind the code to the phone number so a leaked table cannot be brute-forced
+// against every 6-digit value in isolation.
+function otpHash(phone: string, code: string) {
+  return sha256(`${phone}:${code}`);
+}
+
 export async function requestOtp(rawPhone: string, ip: string): Promise<{ devCode?: string; expiresAt: string }> {
   const phone = normalisePhone(rawPhone);
   if (!phone) throw badRequest("Enter a valid phone number.");
@@ -41,7 +47,7 @@ export async function requestOtp(rawPhone: string, ip: string): Promise<{ devCod
   const expiresAt = addMinutes(new Date(), config.otpTtlMinutes).toISOString();
   run(
     `INSERT INTO otp_codes (id, phone, code_hash, attempts, expires_at, consumed_at, created_at) VALUES (?, ?, ?, 0, ?, NULL, ?)`,
-    [newId(), phone, sha256(code), expiresAt, nowIso()],
+    [newId(), phone, otpHash(phone, code), expiresAt, nowIso()],
   );
 
   const result = await sendOtp(phone, code);
@@ -62,7 +68,7 @@ export function verifyOtp(rawPhone: string, code: string, options: { name?: stri
   if (record.consumed_at) throw badRequest("That code has already been used.");
   if (new Date(record.expires_at).getTime() <= Date.now()) throw badRequest("That code has expired. Request a new one.");
   if (record.attempts >= config.otpMaxAttempts) throw tooMany("Too many incorrect attempts. Request a new code.");
-  if (record.code_hash !== sha256(code)) {
+  if (record.code_hash !== otpHash(phone, code)) {
     run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
     throw badRequest("That code is incorrect.");
   }
@@ -142,6 +148,19 @@ export function checkPassword(phone: string, password: string) {
   if (!row) return null;
   if (!verifyPassword(password, row.password_salt, row.password_hash)) return null;
   return row.user_id;
+}
+
+export function hasPassword(userId: string) {
+  return Boolean(get<{ user_id: string }>("SELECT user_id FROM auth_credentials WHERE user_id = ?", [userId]));
+}
+
+export function checkPasswordById(userId: string, password: string) {
+  const row = get<{ password_hash: string; password_salt: string }>(
+    "SELECT password_hash, password_salt FROM auth_credentials WHERE user_id = ?",
+    [userId],
+  );
+  if (!row) return false;
+  return verifyPassword(password, row.password_salt, row.password_hash);
 }
 
 export function createSession(userId: string) {

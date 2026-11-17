@@ -139,9 +139,13 @@ export function listRequests(auth: AuthContext) {
   } else {
     const provider = getProviderForUser(auth.userId);
     if (!provider) return { items: [] };
-    rows = all(`${SELECT} WHERE r.provider_id = ? OR (r.provider_id IS NULL AND r.kind = ?) ORDER BY r.created_at DESC LIMIT 100`, [
+    // Mechanics work both emergency call-outs and scheduled bookings; tow
+    // operators only see tow jobs; vendors do not receive service requests.
+    const kinds = provider.type === "tow" ? ["tow"] : provider.type === "mechanic" ? ["emergency", "booking"] : [];
+    if (kinds.length === 0) return { items: [] };
+    rows = all(`${SELECT} WHERE r.provider_id = ? OR (r.provider_id IS NULL AND r.kind IN (${kinds.map(() => "?").join(",")})) ORDER BY r.created_at DESC LIMIT 100`, [
       provider.id,
-      provider.type === "tow" ? "tow" : "emergency",
+      ...kinds,
     ]);
   }
   return { items: rows.map(hydrate) };
@@ -276,6 +280,7 @@ export function listEvents(auth: AuthContext, id: string) {
 export function availableActions(auth: AuthContext, id: string) {
   const request = getRequestRaw(id);
   if (!request) throw notFound("Request not found.");
+  assertCanView(auth, request);
   return nextStatuses(request.status, actorRoleFor(auth));
 }
 

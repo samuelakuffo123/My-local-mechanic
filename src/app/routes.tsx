@@ -40,7 +40,7 @@ export const router = createBrowserRouter([
   { path: "/", element: <AppEntry /> },
   { path: "/welcome", element: <Navigate replace to="/signup" /> },
   { path: "/signup", element: load(<AuthScreen />) },
-  { path: "/verify", element: <Navigate replace to="/signup" /> },
+  { path: "/verify", element: load(<AuthScreen />) },
   { path: "/login", element: load(<AuthScreen />) },
   { path: "/onboarding/*", element: driver(<VehicleOnboarding />) },
   { path: "/app/home", element: driver(<DriverRoute />) },

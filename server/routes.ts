@@ -1,7 +1,7 @@
 import { get as httpGet, post, patch, del, type RequestContext } from "./http.ts";
 import { run } from "./db.ts";
-import { nowIso } from "./util.ts";
-import { unauthorized, badRequest } from "./errors.ts";
+import { normalisePhone, nowIso, rateLimit } from "./util.ts";
+import { unauthorized, badRequest, notFound, tooMany } from "./errors.ts";
 import * as auth from "./auth.ts";
 import * as vehicles from "./vehicles.ts";
 import * as providers from "./providers.ts";
@@ -44,7 +44,12 @@ export function registerRoutes() {
 
   post("/api/auth/login", (context) => {
     const body = asObject(context.body);
-    const userId = auth.checkPassword(requireString(body, "phone"), requireString(body, "password"));
+    const phone = requireString(body, "phone");
+    const password = requireString(body, "password");
+    // Throttle before touching the password hash so guesses are cheap to reject.
+    if (!rateLimit(`login:ip:${context.ip}`, 40, 15 * 60_000)) throw tooMany();
+    if (!rateLimit(`login:id:${normalisePhone(phone)}`, 10, 15 * 60_000)) throw tooMany();
+    const userId = auth.checkPassword(phone, password);
     if (!userId) throw unauthorized("Incorrect phone number or password.");
     return auth.createSession(userId);
   }, true);
@@ -67,8 +72,14 @@ export function registerRoutes() {
     const body = asObject(context.body);
     const user = auth.getUser(current.userId);
     if (!user) throw unauthorized();
-    const name = optionalString(body, "name") ?? user.name;
-    const email = optionalString(body, "email") ?? user.email;
+    const name = (optionalString(body, "name") ?? user.name).trim();
+    if (!name) throw badRequest("Name is required.");
+    if (name.length > 80) throw badRequest("Name must be 80 characters or fewer.");
+    const emailInput = optionalString(body, "email");
+    const email = emailInput === undefined ? user.email : emailInput.trim() || null;
+    if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      throw badRequest("Enter a valid email address.");
+    }
     run("UPDATE users SET name = ?, email = ?, updated_at = ? WHERE id = ?", [name, email, nowIso(), current.userId]);
     return auth.getUser(current.userId);
   });
@@ -76,14 +87,21 @@ export function registerRoutes() {
   post("/api/me/password", (context) => {
     const current = requireAuth(context);
     const body = asObject(context.body);
-    auth.setPassword(current.userId, requireString(body, "password", { min: 8, max: 128 }));
+    const next = requireString(body, "password", { min: 8, max: 128 });
+    // An existing password must be confirmed before it can be replaced.
+    if (auth.hasPassword(current.userId)) {
+      const currentPassword = optionalString(body, "currentPassword");
+      if (!currentPassword) throw badRequest("Enter your current password.");
+      if (!auth.checkPasswordById(current.userId, currentPassword)) throw unauthorized("Your current password is incorrect.");
+    }
+    auth.setPassword(current.userId, next);
     return { ok: true };
   });
 
   // --- Vehicles ----------------------------------------------------------
   httpGet("/api/vehicles", (context) => ({ items: vehicles.listVehicles(requireAuth(context).userId) }));
   post("/api/vehicles", (context) => vehicles.createVehicle(requireAuth(context), asObject(context.body)));
-  httpGet("/api/vehicles/:id", (context) => vehicles.getVehicle(context.params.id));
+  httpGet("/api/vehicles/:id", (context) => vehicles.getVehicleForUser(requireAuth(context), context.params.id));
   patch("/api/vehicles/:id", (context) => vehicles.updateVehicle(requireAuth(context), context.params.id, asObject(context.body)));
   del("/api/vehicles/:id", (context) => vehicles.deleteVehicle(requireAuth(context), context.params.id));
   httpGet("/api/vehicles/:id/history", (context) => ({ items: requests.serviceHistory(requireAuth(context), context.params.id) }));
@@ -130,8 +148,16 @@ export function registerRoutes() {
   });
 
   httpGet("/api/providers/:id", (context) => {
+    const current = requireAuth(context);
     const provider = providers.getProviderById(context.params.id);
-    return { provider, credentials: provider ? providers.providerCredentials(provider.id) : [] };
+    if (!provider) throw notFound("Provider not found.");
+    // Identity documents are private: only the provider themselves or an admin.
+    const viewerProfile = providers.getProviderForUser(current.userId);
+    const canSeeCredentials = current.role === "admin" || viewerProfile?.id === provider.id;
+    return {
+      provider,
+      credentials: canSeeCredentials ? providers.providerCredentials(provider.id) : [],
+    };
   });
 
   // --- Service requests --------------------------------------------------
@@ -206,9 +232,9 @@ export function registerRoutes() {
     return payments.requestRefund(requireAuth(context), context.params.id, requireNumber(body, "amountGhs", { min: 0.01 }), requireString(body, "reason"));
   });
   post("/api/payments/webhook/:provider", (context) => {
-    const raw = JSON.stringify(context.body ?? {});
+    // Verify the signature over the exact bytes received, not a re-serialisation.
     const signature = context.req.headers["x-paystack-signature"];
-    return payments.handleWebhook(context.params.provider, raw, typeof signature === "string" ? signature : undefined);
+    return payments.handleWebhook(context.params.provider, context.rawBody, typeof signature === "string" ? signature : undefined);
   }, true);
 
   // --- Disputes ----------------------------------------------------------
@@ -237,15 +263,30 @@ export function registerRoutes() {
 
   // --- Admin -------------------------------------------------------------
   httpGet("/api/admin/metrics", (context) => admin.requireAdmin(requireAuth(context), admin.platformMetrics));
-  httpGet("/api/admin/dispatch", (context) => admin.requireAdmin(requireAuth(context), admin.dispatchMonitor));
-  httpGet("/api/admin/audit", (context) => admin.requireAdmin(requireAuth(context), () => admin.listAuditLogs(Number(queryValue(context, "limit") ?? 100))));
-  httpGet("/api/admin/users", (context) => admin.requireAdmin(requireAuth(context), () => auth.listUsers(queryValue(context, "role") as AuthContext["role"] | undefined)));
+  httpGet("/api/admin/dispatch", (context) =>
+    admin.requireAdmin(requireAuth(context), () => ({ items: admin.dispatchMonitor() })),
+  );
+  httpGet("/api/admin/audit", (context) => {
+    const requested = Number(queryValue(context, "limit") ?? 100);
+    const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 100, 1), 500);
+    return admin.requireAdmin(requireAuth(context), () => ({ items: admin.listAuditLogs(limit) }));
+  });
+  httpGet("/api/admin/users", (context) =>
+    admin.requireAdmin(requireAuth(context), () => ({ items: auth.listUsers(queryValue(context, "role") as AuthContext["role"] | undefined) })),
+  );
   httpGet("/api/admin/requests", (context) =>
     admin.requireAdmin(requireAuth(context), () => admin.allRequests(queryValue(context, "status"))),
   );
-  httpGet("/api/admin/providers", (context) =>
-    admin.requireAdmin(requireAuth(context), () => providers.listProvidersByStatus((queryValue(context, "status") as never) ?? ("pending" as never))),
-  );
+  const PROVIDER_STATUSES = ["pending", "verified", "rejected", "suspended"] as const;
+  httpGet("/api/admin/providers", (context) => {
+    const requested = queryValue(context, "status") ?? "pending";
+    if (!(PROVIDER_STATUSES as readonly string[]).includes(requested)) {
+      throw badRequest("Unknown provider status.");
+    }
+    return admin.requireAdmin(requireAuth(context), () => ({
+      items: providers.listProvidersByStatus(requested as (typeof PROVIDER_STATUSES)[number]),
+    }));
+  });
   post("/api/admin/providers/:id/verify", (context) => {
     const current = requireAuth(context);
     admin.assertAdmin(current);
@@ -254,7 +295,9 @@ export function registerRoutes() {
   });
   httpGet("/api/admin/credentials/expiring", (context) => {
     const days = Number(queryValue(context, "days") ?? 30);
-    return admin.requireAdmin(requireAuth(context), () => providers.expiringCredentials(Number.isFinite(days) ? days : 30));
+    return admin.requireAdmin(requireAuth(context), () => ({
+      items: providers.expiringCredentials(Number.isFinite(days) ? days : 30),
+    }));
   });
   post("/api/admin/credentials/suspend-expired", (context) => admin.requireAdmin(requireAuth(context), () => ({ suspended: providers.suspendExpiredProviders() })));
 }

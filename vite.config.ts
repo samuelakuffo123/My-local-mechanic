@@ -20,7 +20,9 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/api": {
-        target: process.env.API_PROXY_TARGET || "http://127.0.0.1:3001",
+        // The client speaks to the TypeScript API (server/index.ts), which
+        // listens on 8787 by default.
+        target: process.env.API_PROXY_TARGET || `http://127.0.0.1:${process.env.API_PORT || 8787}`,
         changeOrigin: true,
       },
     },
