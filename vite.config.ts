@@ -5,6 +5,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 const rootDirectory = path.dirname(fileURLToPath(import.meta.url));
+// The API enforces an Origin allowlist. Tunneled preview requests arrive with a
+// changing public origin, so the local proxy forwards a stable, allowed one.
+const proxyOrigin = (process.env.CORS_ORIGINS ?? "http://localhost:8443").split(",")[0].trim() || "http://localhost:8443";
 
 export default defineConfig({
   base: "/",
@@ -24,6 +27,7 @@ export default defineConfig({
         // listens on 8787 by default.
         target: process.env.API_PROXY_TARGET || `http://127.0.0.1:${process.env.API_PORT || 8787}`,
         changeOrigin: true,
+        headers: { origin: proxyOrigin },
       },
     },
   },
@@ -37,6 +41,7 @@ export default defineConfig({
       "/api": {
         target: process.env.API_PROXY_TARGET || `http://127.0.0.1:${process.env.API_PORT || 8787}`,
         changeOrigin: true,
+        headers: { origin: proxyOrigin },
       },
     },
   },

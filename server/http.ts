@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { AppError } from "./errors.ts";
+import { randomUUID } from "node:crypto";
+import { AppError, methodNotAllowed, originNotAllowed, unsupportedMediaType } from "./errors.ts";
 import { config } from "./config.ts";
 
 export interface AuthContext {
@@ -20,6 +21,8 @@ export interface RequestContext {
   rawBody: string;
   auth: AuthContext | null;
   ip: string;
+  /** Stable identifier echoed in responses and error logs. */
+  requestId: string;
 }
 
 export type Handler = (context: RequestContext) => Promise<unknown> | unknown;
@@ -32,6 +35,8 @@ interface Route {
 }
 
 const routes: Route[] = [];
+const SUPPORTED_METHODS = new Set(["GET", "POST", "PATCH", "DELETE", "OPTIONS"]);
+const JSON_CONTENT_TYPE = /^application\/(?:[\w.+-]+\+)?json(?:\s*;.*)?$/i;
 
 function register(method: string, pattern: string, handler: Handler, isPublic: boolean) {
   routes.push({ method, segments: pattern.split("/").filter(Boolean), handler, public: isPublic });
@@ -57,7 +62,7 @@ function matchRoute(method: string, path: string): { route: Route; params: Recor
         try {
           params[segment.slice(1)] = decodeURIComponent(parts[index]);
         } catch {
-          throw new AppError("Malformed request path.", 400, "bad_request");
+          throw new AppError("The request path is invalid.", 400, "bad_request");
         }
       } else if (segment !== parts[index]) {
         matched = false;
@@ -69,15 +74,49 @@ function matchRoute(method: string, path: string): { route: Route; params: Recor
   return null;
 }
 
+function isAllowedOrigin(origin: string | undefined): origin is string {
+  return typeof origin === "string" && config.corsOrigins.includes(origin);
+}
+
 function applyCors(res: ServerResponse, origin: string | undefined) {
-  if (origin && config.corsOrigins.includes(origin)) {
+  if (isAllowedOrigin(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Credentials", "true");
   }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,Idempotency-Key");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,Idempotency-Key,X-Request-Id");
   res.setHeader("Access-Control-Max-Age", "600");
+}
+
+function applySecurityHeaders(res: ServerResponse) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+  res.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
+  if (config.env === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+}
+
+function requestIdFor(req: IncomingMessage) {
+  const supplied = req.headers["x-request-id"];
+  if (typeof supplied === "string" && /^[A-Za-z0-9._:-]{1,64}$/.test(supplied)) return supplied;
+  return randomUUID();
+}
+
+function hasRequestBody(req: IncomingMessage) {
+  if (req.headers["transfer-encoding"]) return true;
+  const length = req.headers["content-length"];
+  return typeof length === "string" && Number(length) > 0;
+}
+
+function assertJsonContentType(req: IncomingMessage) {
+  if (!hasRequestBody(req)) return;
+  const contentType = req.headers["content-type"];
+  if (typeof contentType !== "string" || !JSON_CONTENT_TYPE.test(contentType)) throw unsupportedMediaType();
 }
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -87,7 +126,7 @@ async function readBody(req: IncomingMessage): Promise<{ body: unknown; raw: str
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) throw new AppError("Request body too large.", 413, "payload_too_large");
+    if (size > MAX_BODY_BYTES) throw new AppError("That request is too large. Please try a smaller request.", 413, "payload_too_large");
     chunks.push(chunk as Buffer);
   }
   if (chunks.length === 0) return { body: null, raw: "" };
@@ -96,7 +135,7 @@ async function readBody(req: IncomingMessage): Promise<{ body: unknown; raw: str
   try {
     return { body: JSON.parse(raw), raw };
   } catch {
-    throw new AppError("Request body must be valid JSON.", 400, "invalid_json");
+    throw new AppError("The request body must be valid JSON.", 400, "invalid_json");
   }
 }
 
@@ -106,24 +145,32 @@ export interface ServerHooks {
 
 export function createRequestHandler(hooks: ServerHooks) {
   return async function handler(req: IncomingMessage, res: ServerResponse) {
+    const requestId = requestIdFor(req);
+    res.setHeader("X-Request-Id", requestId);
+    applySecurityHeaders(res);
+
     try {
       const origin = req.headers.origin;
       applyCors(res, origin);
-      if (req.method === "OPTIONS") {
+      const method = req.method ?? "GET";
+      if (!SUPPORTED_METHODS.has(method)) throw methodNotAllowed();
+      if (origin && !isAllowedOrigin(origin)) throw originNotAllowed();
+      if (method === "OPTIONS") {
         res.statusCode = 204;
         res.end();
         return;
       }
 
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      if (config.env === "production") {
-        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+      let url: URL;
+      try {
+        url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      } catch {
+        throw new AppError("The request URL is invalid.", 400, "bad_request");
       }
 
-      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-      const method = req.method ?? "GET";
       // Inside the try: a malformed path must never escape as a rejection.
       const routeMatch = matchRoute(method, url.pathname);
+      assertJsonContentType(req);
 
       const token = extractToken(req);
       const auth = token ? hooks.authenticate(token) : null;
@@ -131,7 +178,7 @@ export function createRequestHandler(hooks: ServerHooks) {
       const body = parsed.body;
 
       if (!routeMatch) {
-        throw new AppError("No such endpoint.", 404, "not_found");
+        throw new AppError("We couldn't find that endpoint.", 404, "not_found");
       }
       if (!routeMatch.route.public && !auth) {
         throw new AppError("Sign in to continue.", 401, "unauthorized");
@@ -148,6 +195,7 @@ export function createRequestHandler(hooks: ServerHooks) {
         rawBody: parsed.raw,
         auth,
         ip: clientIp(req),
+        requestId,
       };
 
       const result = await routeMatch.route.handler(context);
@@ -159,12 +207,16 @@ export function createRequestHandler(hooks: ServerHooks) {
         return;
       }
       if (error instanceof AppError) {
-        sendJson(res, error.status, { error: { code: error.code, message: error.message, details: error.details } });
+        if (error.status >= 500) console.error(`[api] requestId=${requestId}`, error);
+        sendJson(res, error.status, {
+          error: { code: error.code, message: error.message, details: error.details, requestId },
+        });
       } else {
-        const message = error instanceof Error ? error.message : "Unexpected server error.";
-        // Never leak internals in production responses.
-        sendJson(res, 500, { error: { code: "internal_error", message: config.env === "production" ? "Unexpected server error." : message } });
-        if (config.env !== "test") console.error("[api] unhandled", error);
+        const message = config.env === "production"
+          ? "We couldn't complete that request. Please try again."
+          : error instanceof Error ? error.message : "Unexpected server error.";
+        sendJson(res, 500, { error: { code: "internal_error", message, requestId } });
+        if (config.env !== "test") console.error(`[api] unhandled requestId=${requestId}`, error);
       }
     }
   };

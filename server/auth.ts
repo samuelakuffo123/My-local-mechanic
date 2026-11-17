@@ -8,11 +8,13 @@ import {
   addHours,
   addMinutes,
   hashPassword,
+  isValidPhone,
   newId,
   normalisePhone,
   nowIso,
   randomToken,
   rateLimit,
+  safeEqual,
   sha256,
   verifyPassword,
 } from "./util.ts";
@@ -31,6 +33,12 @@ interface UserRow {
 
 const SELF_SERVE_ROLES: Role[] = ["driver", "mechanic", "tow", "vendor"];
 
+// Used when a phone number has no credentials so unknown numbers take a similar
+// amount of time to reject as known ones.
+const DUMMY_CREDENTIALS = hashPassword("mechnow-dummy-password");
+const PHONE_ERROR = "Enter a valid Ghanaian phone number, like 024 123 4567.";
+const CODE_ERROR = "Enter the 6-digit code from your message.";
+
 // Bind the code to the phone number so a leaked table cannot be brute-forced
 // against every 6-digit value in isolation.
 function otpHash(phone: string, code: string) {
@@ -38,8 +46,8 @@ function otpHash(phone: string, code: string) {
 }
 
 export async function requestOtp(rawPhone: string, ip: string): Promise<{ devCode?: string; expiresAt: string }> {
+  if (!isValidPhone(rawPhone)) throw badRequest(PHONE_ERROR, { field: "phone" });
   const phone = normalisePhone(rawPhone);
-  if (!phone) throw badRequest("Enter a valid phone number.");
   if (!rateLimit(`otp:phone:${phone}`, 5, 15 * 60_000)) throw tooMany("Too many codes requested for this number. Try again later.");
   if (!rateLimit(`otp:ip:${ip}`, 20, 60 * 60_000)) throw tooMany("Too many codes requested. Try again later.");
 
@@ -56,6 +64,8 @@ export async function requestOtp(rawPhone: string, ip: string): Promise<{ devCod
 }
 
 export function verifyOtp(rawPhone: string, code: string, options: { name?: string; role?: Role } = {}) {
+  if (!isValidPhone(rawPhone)) throw badRequest(PHONE_ERROR, { field: "phone" });
+  if (!/^\d{6}$/.test(code)) throw badRequest(CODE_ERROR, { field: "code" });
   const phone = normalisePhone(rawPhone);
   if (!rateLimit(`verify:phone:${phone}`, 10, 15 * 60_000)) throw tooMany();
 
@@ -68,7 +78,7 @@ export function verifyOtp(rawPhone: string, code: string, options: { name?: stri
   if (record.consumed_at) throw badRequest("That code has already been used.");
   if (new Date(record.expires_at).getTime() <= Date.now()) throw badRequest("That code has expired. Request a new one.");
   if (record.attempts >= config.otpMaxAttempts) throw tooMany("Too many incorrect attempts. Request a new code.");
-  if (record.code_hash !== otpHash(phone, code)) {
+  if (!safeEqual(record.code_hash, otpHash(phone, code))) {
     run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
     throw badRequest("That code is incorrect.");
   }
@@ -145,7 +155,11 @@ export function checkPassword(phone: string, password: string) {
     `SELECT c.user_id, c.password_hash, c.password_salt FROM auth_credentials c JOIN users u ON u.id = c.user_id WHERE u.phone = ?`,
     [normalisePhone(phone)],
   );
-  if (!row) return null;
+  if (!row) {
+    // Keep unknown phone numbers from being distinguishable by response time.
+    verifyPassword(password, DUMMY_CREDENTIALS.salt, DUMMY_CREDENTIALS.hash);
+    return null;
+  }
   if (!verifyPassword(password, row.password_salt, row.password_hash)) return null;
   return row.user_id;
 }

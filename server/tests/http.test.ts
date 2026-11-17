@@ -32,8 +32,8 @@ test("HTTP boundary: routing, auth, ownership and response shapes", async () => 
   const port = address.port;
   const base = `http://127.0.0.1:${port}`;
 
-  async function call(path: string, init: { method?: string; body?: unknown; token?: string } = {}) {
-    const headers: Record<string, string> = {};
+  async function call(path: string, init: { method?: string; body?: unknown; token?: string; headers?: Record<string, string> } = {}) {
+    const headers: Record<string, string> = { ...init.headers };
     if (init.token) headers.authorization = `Bearer ${init.token}`;
     if (init.body !== undefined) headers["content-type"] = "application/json";
     const response = await fetch(`${base}${path}`, {
@@ -48,7 +48,7 @@ test("HTTP boundary: routing, auth, ownership and response shapes", async () => 
     } catch {
       json = text;
     }
-    return { status: response.status, json: json as Record<string, unknown> & { items?: unknown[] } };
+    return { status: response.status, json: json as Record<string, unknown> & { items?: unknown[] }, headers: response.headers };
   }
 
   /** Sends the path verbatim; fetch would re-encode an invalid escape. */
@@ -69,8 +69,40 @@ test("HTTP boundary: routing, auth, ownership and response shapes", async () => 
 
   try {
     // --- Health and auth gate ------------------------------------------------
-    assert.equal((await call("/api/health")).status, 200);
+    const health = await call("/api/health");
+    assert.equal(health.status, 200);
+    assert.match(health.headers.get("x-request-id") ?? "", /^[A-Za-z0-9._:-]{1,64}$/);
+    assert.equal(health.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(health.headers.get("x-frame-options"), "DENY");
+    assert.equal(health.headers.get("referrer-policy"), "no-referrer");
+    assert.equal(health.headers.get("cache-control"), "no-store");
+    assert.match(health.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     assert.equal((await call("/api/vehicles")).status, 401);
+
+    // --- Friendly, structured validation errors ------------------------------
+    const invalidPhone = await call("/api/auth/otp/request", { body: { phone: "not-a-phone" } });
+    assert.equal(invalidPhone.status, 400);
+    const invalidPhoneError = invalidPhone.json.error as { message?: string; details?: { field?: string }; requestId?: string };
+    assert.match(invalidPhoneError.message ?? "", /valid Ghanaian phone/i);
+    assert.equal(invalidPhoneError.details?.field, "phone");
+    assert.match(invalidPhoneError.requestId ?? "", /^[A-Za-z0-9._:-]{1,64}$/);
+
+    const invalidCode = await call("/api/auth/verify", { body: { phone: "0244000001", code: "12ab" } });
+    assert.equal(invalidCode.status, 400);
+    assert.match(((invalidCode.json.error as { message?: string }).message ?? ""), /6-digit code/i);
+
+    // --- Requests from untrusted browser origins and non-JSON bodies are refused
+    const badOrigin = await call("/api/auth/otp/request", {
+      body: { phone: "0244000001" },
+      headers: { origin: "https://evil.example" },
+    });
+    assert.equal(badOrigin.status, 403, "untrusted browser origins are rejected");
+    const badContentType = await fetch(`${base}/api/auth/otp/request`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "{}",
+    });
+    assert.equal(badContentType.status, 415, "bodies must be JSON");
 
     // --- A malformed path is a 400, not a process crash ----------------------
     const malformed = await rawGet("/api/vehicles/%E0%A4%A");

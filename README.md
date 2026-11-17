@@ -43,11 +43,11 @@ The Mapbox public token is sent to browsers by design. Restrict it to the app's 
 
 Emergency requests, including their optional latitude and longitude, are already saved to the signed-in user's SQLite record by the API; no separate map database is required. Coordinates are stored in the app only when the user saves the request; using Mapbox features sends address searches or selected coordinates to Mapbox for lookup.
 
-For deployment, set `NODE_ENV=production` and configure `APP_ORIGIN` (or comma-separated `APP_ORIGINS`) to the exact HTTPS origin serving the client. Route that origin's `/api` path to this server with a reverse proxy; production session cookies are marked `Secure`. Keep the database file and its backups private, use HTTPS, and apply normal database backup/retention controls.
+For deployment, set `NODE_ENV=production` and configure `CORS_ORIGINS` with the exact HTTPS origin serving the client. Route that origin's `/api` path to this server with a reverse proxy. Keep the database file and its backups private, use HTTPS, and apply normal database backup/retention controls. API responses include an `X-Request-Id` header and the same `requestId` in error bodies for support diagnostics.
 
 ## API
 
-All mutation requests require an allowed `Origin` and JSON bodies. Authenticated endpoints use an HttpOnly, SameSite=Lax session cookie; account data and records are scoped to that session.
+Requests with a body must send `Content-Type: application/json`, and browser mutation requests must come from an origin listed in `CORS_ORIGINS`. Authenticated endpoints use a bearer token stored by the client; account data and records are scoped to that session. The local Vite proxy rewrites tunnel origins to the first configured `CORS_ORIGINS` value so the phone-install flow keeps working.
 
 | Method | Path | Purpose |
 |---|---|---|

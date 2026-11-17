@@ -11,7 +11,18 @@ import * as payments from "./payments.ts";
 import * as disputes from "./disputes.ts";
 import * as notifications from "./notifications.ts";
 import * as admin from "./admin.ts";
-import { asObject, enumValue, optionalArray, optionalString, requireNumber, requireString } from "./validation.ts";
+import {
+  asObject,
+  enumValue,
+  optionalArray,
+  optionalEnumValue,
+  optionalPhone,
+  optionalString,
+  requireNumber,
+  requireOtpCode,
+  requirePhone,
+  requireString,
+} from "./validation.ts";
 import type { AuthContext } from "./http.ts";
 import type { RequestStatus } from "./stateMachine.ts";
 
@@ -32,20 +43,20 @@ export function registerRoutes() {
   // --- Auth --------------------------------------------------------------
   post("/api/auth/otp/request", async (context) => {
     const body = asObject(context.body);
-    return auth.requestOtp(requireString(body, "phone"), context.ip);
+    return auth.requestOtp(requirePhone(body), context.ip);
   }, true);
 
   post("/api/auth/verify", (context) => {
     const body = asObject(context.body);
-    const name = optionalString(body, "name");
-    const role = optionalString(body, "role") as AuthContext["role"] | undefined;
-    return auth.verifyOtp(requireString(body, "phone"), requireString(body, "code"), { name, role });
+    const name = optionalString(body, "name", { max: 80 });
+    const role = optionalEnumValue(body, "role", ["driver", "mechanic", "tow", "vendor"] as const);
+    return auth.verifyOtp(requirePhone(body), requireOtpCode(body), { name, role });
   }, true);
 
   post("/api/auth/login", (context) => {
     const body = asObject(context.body);
-    const phone = requireString(body, "phone");
-    const password = requireString(body, "password");
+    const phone = requirePhone(body);
+    const password = requireString(body, "password", { max: 128 });
     // Throttle before touching the password hash so guesses are cheap to reject.
     if (!rateLimit(`login:ip:${context.ip}`, 40, 15 * 60_000)) throw tooMany();
     if (!rateLimit(`login:id:${normalisePhone(phone)}`, 10, 15 * 60_000)) throw tooMany();
@@ -72,13 +83,12 @@ export function registerRoutes() {
     const body = asObject(context.body);
     const user = auth.getUser(current.userId);
     if (!user) throw unauthorized();
-    const name = (optionalString(body, "name") ?? user.name).trim();
-    if (!name) throw badRequest("Name is required.");
-    if (name.length > 80) throw badRequest("Name must be 80 characters or fewer.");
-    const emailInput = optionalString(body, "email");
+    const name = (optionalString(body, "name", { max: 80 }) ?? user.name).trim();
+    if (!name) throw badRequest("Name is required.", { field: "name" });
+    const emailInput = optionalString(body, "email", { max: 254 });
     const email = emailInput === undefined ? user.email : emailInput.trim() || null;
     if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-      throw badRequest("Enter a valid email address.");
+      throw badRequest("Enter a valid email address.", { field: "email" });
     }
     run("UPDATE users SET name = ?, email = ?, updated_at = ? WHERE id = ?", [name, email, nowIso(), current.userId]);
     return auth.getUser(current.userId);
@@ -91,8 +101,10 @@ export function registerRoutes() {
     // An existing password must be confirmed before it can be replaced.
     if (auth.hasPassword(current.userId)) {
       const currentPassword = optionalString(body, "currentPassword");
-      if (!currentPassword) throw badRequest("Enter your current password.");
-      if (!auth.checkPasswordById(current.userId, currentPassword)) throw unauthorized("Your current password is incorrect.");
+      if (!currentPassword) throw badRequest("Enter your current password.", { field: "currentPassword" });
+      if (!auth.checkPasswordById(current.userId, currentPassword)) {
+        throw unauthorized("Your current password is incorrect.");
+      }
     }
     auth.setPassword(current.userId, next);
     return { ok: true };
@@ -203,12 +215,18 @@ export function registerRoutes() {
     const body = asObject(context.body);
     const rawLat = body.lat;
     const rawLng = body.lng;
-    const lat = typeof rawLat === "number" ? rawLat : rawLat == null || rawLat === "" ? undefined : Number(rawLat);
-    const lng = typeof rawLng === "number" ? rawLng : rawLng == null || rawLng === "" ? undefined : Number(rawLng);
+    const lat = rawLat == null || rawLat === "" ? undefined : Number(rawLat);
+    const lng = rawLng == null || rawLng === "" ? undefined : Number(rawLng);
+    if (lat !== undefined && (!Number.isFinite(lat) || lat < -90 || lat > 90)) {
+      throw badRequest("Latitude must be a number between -90 and 90.", { field: "lat" });
+    }
+    if (lng !== undefined && (!Number.isFinite(lng) || lng < -180 || lng > 180)) {
+      throw badRequest("Longitude must be a number between -180 and 180.", { field: "lng" });
+    }
     return requests.updateRequestLocation(requireAuth(context), context.params.id, {
-      label: optionalString(body, "label"),
-      lat: lat !== undefined && Number.isFinite(lat) ? lat : undefined,
-      lng: lng !== undefined && Number.isFinite(lng) ? lng : undefined,
+      label: optionalString(body, "label", { max: 160 }),
+      lat,
+      lng,
     });
   });
 
@@ -234,7 +252,7 @@ export function registerRoutes() {
       amountGhs: requireNumber(body, "amountGhs", { min: 0.01 }),
       method: enumValue(body, "method", ["momo", "cash", "card"] as const),
       idempotencyKey: requireString(body, "idempotencyKey"),
-      customerPhone: optionalString(body, "customerPhone"),
+      customerPhone: optionalPhone(body, "customerPhone"),
     });
   });
   httpGet("/api/payments", (context) => ({ items: payments.listPayments(requireAuth(context), queryValue(context, "requestId")) }));
@@ -294,7 +312,7 @@ export function registerRoutes() {
   httpGet("/api/admin/providers", (context) => {
     const requested = queryValue(context, "status") ?? "pending";
     if (!(PROVIDER_STATUSES as readonly string[]).includes(requested)) {
-      throw badRequest("Unknown provider status.");
+      throw badRequest("Choose a valid provider status: pending, verified, rejected, or suspended.", { field: "status" });
     }
     return admin.requireAdmin(requireAuth(context), () => ({
       items: providers.listProvidersByStatus(requested as (typeof PROVIDER_STATUSES)[number]),
