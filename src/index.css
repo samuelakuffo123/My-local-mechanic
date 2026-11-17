@@ -306,7 +306,11 @@ h3 { font-size: 15px; line-height: 1.35; }
   .s2-rating,
   .d-provider-list footer b,
   .d-card-title button,
-  .s2-section-title button
+  .s2-section-title button,
+  .s2-header>div span,
+  .auth-kicker,
+  .d-topbar>div:first-child span,
+  .d-brand em
 ) {
   color: #1949b8 !important;
 }
@@ -318,6 +322,12 @@ h3 { font-size: 15px; line-height: 1.35; }
   .assurance-row,
   .s2-compatible,
   .s2-locked,
+  .s2-calm-note,
+  .s2-record>.s2-locked,
+  .s2-record>section>div svg,
+  .s2-vehicle-choice em,
+  .d-metric p,
+  .d-chart-head small,
   .d-ready,
   .d-complete-chip
 ) {
@@ -371,9 +381,12 @@ h3 { font-size: 15px; line-height: 1.35; }
   color: #f4f6f8;
 }
 [data-theme="light"] .d-map-card .d-button {
-  color: #ffffff !important;
+  color: #0b1020 !important;
 }
-[data-theme="light"] :is(.button--primary,.button--danger,.hold-button,.s2-button--primary,.s2-button--danger,.d-button--primary,.d-button--danger) {
+[data-theme="light"] :is(.button--primary,.s2-button--primary,.d-button--primary) {
+  color: #0b1020;
+}
+[data-theme="light"] :is(.button--danger,.hold-button,.s2-button--danger,.d-button--danger) {
   color: #ffffff;
 }
 [data-theme="light"] :is(.s2-button--success,.d-button--success) {
@@ -440,13 +453,14 @@ h3 { font-size: 15px; line-height: 1.35; }
   border-color: #c9d1dc;
 }
 [data-theme="light"] .d-workspace-picker button.active {
-  color: #ffffff !important;
+  color: #0b1020 !important;
 }
 [data-theme="light"] .d-state-action {
   color: var(--text);
 }
 [data-theme="light"] .d-state-action > div small,
-[data-theme="light"] .d-state-action > div span {
+[data-theme="light"] .d-state-action > div span,
+[data-theme="light"] .d-admin-alert small {
   color: #52658e;
 }
 [data-theme="light"] .d-emergency-request {
