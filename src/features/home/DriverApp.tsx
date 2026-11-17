@@ -1305,6 +1305,9 @@ function ArrivedScreen({ onEstimate }: { onEstimate: () => void }) {
         </div>
         <SafetyActions onCancel={() => undefined} />
       </main>
+      <div className="sticky-action">
+        <Button onClick={onEstimate}>View estimate</Button>
+      </div>
     </div>
   );
 }
@@ -1552,9 +1555,12 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
         setLiveRequest(request);
         return;
       }
+      // Only the customer-owned stages are pushed here; provider stages are
+      // advanced from the provider workspace and must not be forced by the UI.
+      const customerOwned: RequestStatus[] = ["requested"];
       for (const status of statuses) {
         const mapped = emergencyBackendMap[status];
-        if (mapped) {
+        if (mapped && customerOwned.includes(mapped)) {
           const updated = await emergencyService.progress(backendRequestId.current, mapped);
           setLiveRequest(updated);
         }

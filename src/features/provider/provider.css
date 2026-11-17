@@ -2396,14 +2396,16 @@
   .d-sidebar,.d-simple-sidebar,.d-owner-sidebar {
     grid-row:auto;
     grid-column:1;
-    flex-direction:row;
-    align-items:center;
-    gap:2px;
-    padding:0 6px;
+    width:100%;
+    max-width:100%;
+    min-width:0;
+    flex-direction:column;
+    align-items:stretch;
+    gap:0;
+    padding:0 6px 7px;
     border-right:0;
     border-bottom:1px solid var(--border);
-    overflow-x:auto;
-    scrollbar-width:none
+    overflow:visible
   }
   .d-sidebar::-webkit-scrollbar,.d-simple-sidebar::-webkit-scrollbar,.d-owner-sidebar::-webkit-scrollbar {
     display:none
@@ -2420,10 +2422,13 @@
   }
   .d-sidebar nav,.d-simple-sidebar nav,.d-owner-sidebar nav {
     flex-direction:row;
-    gap:2px;
+    flex-wrap:wrap;
+    gap:3px;
     margin:0;
-    overflow-x:auto;
-    scrollbar-width:none
+    width:100%;
+    min-width:0;
+    flex:0 0 auto;
+    overflow:visible
   }
   .d-sidebar nav::-webkit-scrollbar,.d-simple-sidebar nav::-webkit-scrollbar,.d-owner-sidebar nav::-webkit-scrollbar {
     display:none
@@ -2433,16 +2438,20 @@
   }
   .d-sidebar nav button,.d-simple-sidebar nav button,.d-owner-sidebar nav button {
     width:auto;
-    min-height:40px;
+    max-width:100%;
+    min-width:0;
+    min-height:38px;
     justify-content:flex-start;
-    padding:0 11px;
+    gap:6px;
+    padding:0 9px;
     font-size:9px;
     white-space:nowrap;
-    flex:0 0 auto
+    flex:0 1 auto
   }
-  .d-sidebar nav button span,.d-simple-sidebar nav button:not(.active) {
+  .d-sidebar nav button span,.d-simple-sidebar nav button span,.d-owner-sidebar nav button span {
     display:inline-flex;
-    flex:0 0 auto
+    flex:0 1 auto;
+    min-width:0
   }
   .d-owner-sidebar .d-brand strong,.d-owner-sidebar nav button {
     font-size:9px
@@ -2494,6 +2503,11 @@
   }
   .d-metric-grid,.d-metric-grid--three {
     grid-template-columns:1fr 1fr
+  }
+  .d-table {
+    table-layout:fixed;
+    white-space:normal;
+    overflow-wrap:anywhere
   }
   .d-dashboard-grid,.d-admin-grid,.d-vendor-grid,.d-handoff-grid,.d-split-view {
     grid-template-columns:1fr
