@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter, Navigate } from "react-router";
 import { RouteGuard } from "./RouteGuard";
+import { hasCompletedOnboarding } from "../features/onboarding/onboardingState";
 import { useAppStore } from "../state/store";
 
 const AdminRoute = lazy(() => import("../features/admin/AdminRoute").then((module) => ({ default: module.AdminRoute })));
@@ -10,6 +11,7 @@ const BookingRoute = lazy(() => import("../features/booking/BookingRoute").then(
 const ChatRoute = lazy(() => import("../features/chat/ChatRoute").then((module) => ({ default: module.ChatRoute })));
 const EmergencyRoute = lazy(() => import("../features/emergency/EmergencyRoute").then((module) => ({ default: module.EmergencyRoute })));
 const FeatureRoute = lazy(() => import("../features/explore/FeatureRoute").then((module) => ({ default: module.FeatureRoute })));
+const OnboardingScreen = lazy(() => import("../features/onboarding/OnboardingScreen").then((module) => ({ default: module.OnboardingScreen })));
 const DriverRoute = lazy(() => import("../features/home/DriverRoute").then((module) => ({ default: module.DriverRoute })));
 const VehicleOnboarding = lazy(() => import("../features/onboarding/VehicleOnboarding").then((module) => ({ default: module.VehicleOnboarding })));
 const PartsRoute = lazy(() => import("../features/parts/PartsRoute").then((module) => ({ default: module.PartsRoute })));
@@ -26,7 +28,9 @@ function AppEntry() {
   const authenticated = useAppStore((state) => state.authenticated);
   const role = useAppStore((state) => state.user?.role);
   const destination = !authenticated
-    ? "/signup"
+    ? hasCompletedOnboarding()
+      ? "/signup"
+      : "/welcome"
     : role === "admin"
       ? "/admin"
       : role === "driver"
@@ -38,7 +42,7 @@ function AppEntry() {
 
 export const router = createBrowserRouter([
   { path: "/", element: <AppEntry /> },
-  { path: "/welcome", element: <Navigate replace to="/signup" /> },
+  { path: "/welcome", element: load(<OnboardingScreen />) },
   { path: "/signup", element: load(<AuthScreen />) },
   { path: "/verify", element: load(<AuthScreen />) },
   { path: "/login", element: load(<AuthScreen />) },
