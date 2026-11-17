@@ -306,3 +306,28 @@ export function serviceHistory(auth: AuthContext, vehicleId: string) {
     return { request, approvedEstimate: estimate ?? null, payment: payment ?? null };
   });
 }
+
+export function updateRequestLocation(
+  auth: AuthContext,
+  id: string,
+  location: { label?: string; lat?: number; lng?: number },
+) {
+  const request = getRequestRaw(id);
+  if (!request) throw notFound("Request not found.");
+  assertCanView(auth, request);
+  if (auth.role === "driver" && request.customerId !== auth.userId) throw forbidden();
+  if (request.status === "completed" || request.status === "cancelled") {
+    throw conflict("This request can no longer be updated.");
+  }
+  const label = location.label ?? request.location.label;
+  const lat = typeof location.lat === "number" && Number.isFinite(location.lat) ? location.lat : request.location.lat;
+  const lng = typeof location.lng === "number" && Number.isFinite(location.lng) ? location.lng : request.location.lng;
+  run("UPDATE service_requests SET location_label = ?, lat = ?, lng = ?, updated_at = ? WHERE id = ?", [
+    label ?? null,
+    lat ?? null,
+    lng ?? null,
+    nowIso(),
+    id,
+  ]);
+  return getRequestRaw(id);
+}

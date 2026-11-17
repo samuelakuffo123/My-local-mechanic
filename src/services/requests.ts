@@ -20,6 +20,7 @@ export interface RequestService {
   decline(id: string, reason?: string): Promise<ServiceRequest>;
   transition(id: string, to: RequestStatus, note?: string): Promise<ServiceRequest>;
   cancel(id: string, reason: string): Promise<ServiceRequest>;
+  updateLocation(id: string, location: { label?: string; lat?: number; lng?: number }): Promise<ServiceRequest>;
   events(id: string): Promise<RequestEvent[]>;
   actions(id: string): Promise<RequestStatus[]>;
 }
@@ -33,6 +34,7 @@ const serverRequests: RequestService = {
   decline: (id, reason) => apiRequest<ServiceRequest>(`/service-requests/${id}/decline`, { method: "POST", body: { reason } }),
   transition: (id, to, note) => apiRequest<ServiceRequest>(`/service-requests/${id}/transition`, { method: "POST", body: { to, note } }),
   cancel: (id, reason) => apiRequest<ServiceRequest>(`/service-requests/${id}/cancel`, { method: "POST", body: { reason } }),
+  updateLocation: (id, location) => apiRequest<ServiceRequest>(`/service-requests/${id}/location`, { method: "POST", body: location }),
   events: async (id) => (await apiRequest<{ items: RequestEvent[] }>(`/service-requests/${id}/events`)).items,
   actions: async (id) => (await apiRequest<{ actions: RequestStatus[] }>(`/service-requests/${id}/actions`)).actions,
 };
@@ -92,6 +94,17 @@ const localRequests: RequestService = {
   decline: async (id) => patch(id, { providerId: null }),
   transition: async (id, to) => patch(id, { status: to }),
   cancel: async (id, reason) => patch(id, { status: "cancelled", cancellationReason: reason }),
+  updateLocation: async (id, location) => {
+    const current = read().find((item) => item.id === id);
+    if (!current) throw new Error("Request not found.");
+    return patch(id, {
+      location: {
+        label: location.label ?? current.location.label,
+        lat: typeof location.lat === "number" ? location.lat : current.location.lat,
+        lng: typeof location.lng === "number" ? location.lng : current.location.lng,
+      },
+    });
+  },
   events: async () => [],
   actions: async () => [],
 };

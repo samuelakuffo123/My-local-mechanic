@@ -199,6 +199,19 @@ export function registerRoutes() {
     return requests.cancelRequest(requireAuth(context), context.params.id, optionalString(body, "reason") ?? "");
   });
 
+  post("/api/service-requests/:id/location", (context) => {
+    const body = asObject(context.body);
+    const rawLat = body.lat;
+    const rawLng = body.lng;
+    const lat = typeof rawLat === "number" ? rawLat : rawLat == null || rawLat === "" ? undefined : Number(rawLat);
+    const lng = typeof rawLng === "number" ? rawLng : rawLng == null || rawLng === "" ? undefined : Number(rawLng);
+    return requests.updateRequestLocation(requireAuth(context), context.params.id, {
+      label: optionalString(body, "label"),
+      lat: lat !== undefined && Number.isFinite(lat) ? lat : undefined,
+      lng: lng !== undefined && Number.isFinite(lng) ? lng : undefined,
+    });
+  });
+
   // --- Estimates ---------------------------------------------------------
   post("/api/service-requests/:id/estimates", (context) => {
     const body = asObject(context.body);

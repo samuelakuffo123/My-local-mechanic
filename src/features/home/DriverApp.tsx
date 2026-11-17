@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   ArrowLeft,
@@ -64,8 +64,11 @@ import mechanicPhoto from "../../assets/mechanic.jpg";
 import { useAppStore } from "../../state/store";
 import { emergencyService } from "../../services/emergency";
 import { providerService } from "../../services/providers";
-import type { ProviderProfile, RequestStatus } from "../../services/apiTypes";
+import { requestService } from "../../services/requests";
+import type { ProviderProfile, RequestStatus, ServiceRequest } from "../../services/apiTypes";
 import type { EmergencyStatus } from "../../state/emergencyMachine";
+import { LiveMap } from "../../components/LiveMap";
+import { useGeolocation, type GeoPoint } from "../../hooks/useGeolocation";
 
 // The emergency walkthrough is a scripted UI state machine. As it progresses we
 // mirror the meaningful stages onto a persisted service request so the job is
@@ -887,11 +890,21 @@ function LocationScreen({
   onBack,
   onContinue,
   onDenied,
+  location,
+  loading,
+  error,
+  onRefresh,
 }: {
   onBack: () => void;
   onContinue: () => void;
   onDenied: () => void;
+  location: GeoPoint | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
 }) {
+  const coordsLabel = location ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}` : "Location not confirmed yet";
+  const placeLabel = location?.label?.trim() || "Current location";
   return (
     <div className="screen">
       <AppHeader onBack={onBack} step={2} />
@@ -902,17 +915,18 @@ function LocationScreen({
           <p>We'll only share your live location with your assigned provider.</p>
         </div>
         <div className="location-map">
-          <span className="map-grid" />
-          <span className="street street--one" />
-          <span className="street street--two" />
-          <div className="location-pulse"><Navigation size={20} fill="currentColor" /></div>
-          <span className="map-label map-label--one">Ringway Estates</span>
-          <span className="map-label map-label--two">Osu</span>
+          <LiveMap user={location ? { lat: location.lat, lng: location.lng, label: placeLabel, kind: "user" } : null} height={235} followUser />
         </div>
         <div className="location-card">
           <div className="location-card__icon"><MapPin size={20} /></div>
-          <div><span className="overline">DETECTED LOCATION</span><strong>Oxford Street, Osu</strong><p>Accra, Greater Accra</p></div>
-          <button onClick={onDenied} type="button">Edit</button>
+          <div className="location-meta">
+            <span className="overline">DETECTED LOCATION</span>
+            <strong>{loading ? "Detecting your location…" : placeLabel}</strong>
+            <p>{coordsLabel}</p>
+            {error && <p className="location-status location-status--error">{error}</p>}
+            {!error && location && <p className="location-status">Live GPS location ready to share for this request.</p>}
+          </div>
+          <button onClick={onRefresh} type="button">Refresh</button>
         </div>
         <button className="manual-location" onClick={onDenied} type="button">
           <Search size={18} />
@@ -922,7 +936,7 @@ function LocationScreen({
         <div className="privacy-note"><ShieldCheck size={17} /><span>Your precise location is encrypted and only used for this request.</span></div>
       </main>
       <div className="sticky-action">
-        <Button icon={LocateFixed} onClick={onContinue}>Use this location</Button>
+        <Button icon={LocateFixed} onClick={onContinue} disabled={!location || loading}>Use this location</Button>
       </div>
     </div>
   );
@@ -1156,43 +1170,81 @@ function SafetyActions({ onCancel }: { onCancel: () => void }) {
 function TrackingScreen({
   onArrived,
   onScenario,
+  request,
+  userLocation,
+  error,
+  onRefresh,
 }: {
   onArrived: () => void;
   onScenario: (value: Scenario) => void;
+  request: ServiceRequest | null;
+  userLocation: GeoPoint | null;
+  error: string | null;
+  onRefresh: () => void;
 }) {
+  const status = request?.status ?? "requested";
+  const statusLabel: Record<string, string> = {
+    requested: "Finding a provider",
+    accepted: "Provider accepted",
+    enRoute: "Provider en route",
+    arrived: "Provider arrived",
+    diagnosing: "Diagnosing",
+    awaitingApproval: "Estimate ready",
+    repairing: "Repair in progress",
+    awaitingParts: "Waiting for parts",
+    completed: "Completed",
+    cancelled: "Cancelled",
+  };
+  const steps = ["accepted", "enRoute", "arrived"];
+  const currentIndex = Math.max(0, steps.indexOf(status));
+  const title = status === "accepted" ? "Provider confirmed" : status === "arrived" ? "Provider has arrived" : "Help is on the way";
+  const locationLabel = request?.location.label || userLocation?.label || "Your current location";
+  const providerName = request?.provider?.businessName || "Assigned provider";
+
   return (
     <div className="screen tracking-screen">
       <div className="tracking-map">
-        <span className="map-grid" />
-        <span className="route-line" />
-        <span className="route-start"><MapPin size={16} /></span>
-        <span className="route-provider"><Car size={17} /></span>
+        <LiveMap
+          user={userLocation ? { lat: userLocation.lat, lng: userLocation.lng, label: userLocation.label ?? "You", kind: "user" } : null}
+          destination={request?.location.lat != null && request?.location.lng != null ? { lat: request.location.lat, lng: request.location.lng, label: request.location.label, kind: "destination" } : null}
+          height={335}
+          followUser
+        />
         <div className="tracking-top">
-          <IconButton label="Back to home" icon={ArrowLeft} />
           <span><span className="live-dot" /> LIVE TRACKING</span>
-          <IconButton label="More options" icon={MoreHorizontal} />
         </div>
-        <span className="map-eta">8 MIN</span>
       </div>
       <main className="tracking-sheet">
         <div className="sheet-handle" />
-        <span className="signal-label signal-label--green"><span /> PROVIDER EN ROUTE</span>
-        <div className="arrival-heading"><div><h1>Kojo is on the way</h1><p>Arriving in <strong>8–10 minutes</strong></p></div><div className="eta-number"><strong>8</strong><span>MIN</span></div></div>
+        <span className="signal-label signal-label--green"><span /> {statusLabel[status] ?? "Live update"}</span>
+        <div className="arrival-heading">
+          <div>
+            <h1>{title}</h1>
+            <p>{providerName} · <strong>{request?.ref ?? "Request pending"}</strong></p>
+            <small>{locationLabel}</small>
+          </div>
+          <div className="eta-number"><strong>{status === "enRoute" ? "LIVE" : status === "arrived" ? "HERE" : "…"}</strong><span>STATUS</span></div>
+        </div>
+        {error && <p className="location-status location-status--error">{error}</p>}
         <div className="provider-contact">
-          <div className="provider-avatar">KA</div>
-          <div><strong>Kojo Mensah</strong><span>Kojo AutoCare · Toyota Hilux</span><small>GT 4198-22</small></div>
-          <IconButton label="Chat with Kojo" icon={MessageCircle} />
-          <IconButton label="Call Kojo" icon={Phone} />
+          <div className="provider-avatar">{providerName.slice(0, 2).toUpperCase()}</div>
+          <div><strong>{providerName}</strong><span>{request?.problem || "Emergency assistance"}</span><small>{statusLabel[status] ?? status}</small></div>
+          <IconButton label="Refresh tracking" icon={RefreshCw} onClick={onRefresh} />
         </div>
         <div className="status-timeline">
-          {["Matched", "En route", "Nearby", "Arrived"].map((item, index) => (
-            <div className={index < 2 ? "complete" : index === 2 ? "current" : ""} key={item}>
-              <span>{index < 2 ? <Check size={12} /> : null}</span><small>{item}</small>
+          {["Matched", "En route", "Arrived"].map((item, index) => (
+            <div className={index < currentIndex ? "complete" : index === currentIndex ? "current" : ""} key={item}>
+              <span>{index < currentIndex ? <Check size={12} /> : null}</span><small>{item}</small>
             </div>
           ))}
         </div>
-        <div className="safety-tip"><ShieldCheck size={18} /><span><strong>Stay somewhere safe and visible</strong><small>Turn on your hazard lights if you're roadside.</small></span></div>
+        <div className="safety-tip"><ShieldCheck size={18} /><span><strong>Live location sharing is active</strong><small>Your location updates while this request is in progress.</small></span></div>
         <SafetyActions onCancel={() => onScenario("cancelled")} />
+        {(status === "arrived" || status === "diagnosing" || status === "awaitingApproval" || status === "repairing") && (
+          <div className="sticky-action" style={{ padding: 0, marginTop: 12 }}>
+            <Button onClick={onArrived}>Continue service</Button>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -1401,6 +1453,10 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
   const [screen, setScreen] = useState<Screen>(() => initialScreen === "need" ? screenForEmergency(useAppStore.getState().emergencyRequest?.status) : initialScreen);
   const [selectedProblem, setSelectedProblem] = useState("");
   const [scenario, setScenario] = useState<Scenario | null>(null);
+  const [requestLocation, setRequestLocation] = useState<GeoPoint | null>(null);
+  const [liveRequest, setLiveRequest] = useState<ServiceRequest | null>(null);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
+  const geo = useGeolocation({ immediate: false, watch: screen === "tracking" || screen === "location" || screen === "searching" || screen === "sent" });
   const theme = useAppStore((state) => state.theme);
   const setTheme = useAppStore((state) => state.setTheme);
   const emergencyRequest = useAppStore((state) => state.emergencyRequest);
@@ -1414,27 +1470,50 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
     if (emergencyRequest && ["reviewed", "cancelled"].includes(emergencyRequest.status)) clearEmergency();
     if (!emergencyRequest || ["reviewed", "cancelled"].includes(emergencyRequest.status)) startEmergency();
     backendRequestId.current = null;
+    setLiveRequest(null);
+    setTrackingError(null);
     navigate("/app/emergency/problem");
   };
+
+  useEffect(() => {
+    if (geo.point) {
+      setRequestLocation((current) => ({
+        ...geo.point!,
+        label: current?.label ?? geo.point?.label ?? "Current location",
+      }));
+    }
+  }, [geo.point]);
+
+  const ensureLocation = useCallback(() => {
+    if (requestLocation) return requestLocation;
+    if (geo.point) return { ...geo.point, label: geo.point.label ?? "Current location" };
+    return null;
+  }, [geo.point, requestLocation]);
 
   const syncEmergency = async (statuses: EmergencyStatus[]) => {
     try {
       if (!backendRequestId.current) {
         if (!statuses.includes("requested") || !vehicle) return;
+        const loc = ensureLocation();
         const request = await emergencyService.submit({
           vehicleId: vehicle.id,
           problem: selectedProblem || "Emergency assistance requested",
-          location: { label: "Oxford Street, Osu" },
+          location: loc ? { label: loc.label ?? "Current location", lat: loc.lat, lng: loc.lng } : { label: "Location not shared" },
         });
         backendRequestId.current = request.id;
+        setLiveRequest(request);
         return;
       }
       for (const status of statuses) {
         const mapped = emergencyBackendMap[status];
-        if (mapped) await emergencyService.progress(backendRequestId.current, mapped);
+        if (mapped) {
+          const updated = await emergencyService.progress(backendRequestId.current, mapped);
+          setLiveRequest(updated);
+        }
       }
     } catch (error) {
       console.error(error);
+      setTrackingError(error instanceof Error ? error.message : "Could not sync request.");
     }
   };
 
@@ -1447,6 +1526,39 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
     }
     void syncEmergency(statuses);
   };
+
+  useEffect(() => {
+    if (screen === "location" && !geo.point && !geo.loading) geo.request();
+  }, [geo, screen]);
+
+  useEffect(() => {
+    const id = backendRequestId.current;
+    if (!id || !requestLocation || !["location", "searching", "sent", "tracking"].includes(screen)) return;
+    void requestService
+      .updateLocation(id, { label: requestLocation.label ?? "Current location", lat: requestLocation.lat, lng: requestLocation.lng })
+      .then((updated) => setLiveRequest(updated))
+      .catch(() => undefined);
+  }, [requestLocation, screen]);
+
+  useEffect(() => {
+    const id = backendRequestId.current;
+    if (!id || screen !== "tracking") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const fresh = await requestService.get(id);
+        if (!cancelled) setLiveRequest(fresh);
+      } catch (error) {
+        if (!cancelled) setTrackingError(error instanceof Error ? error.message : "Could not refresh tracking.");
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [screen]);
 
   const openDriverFeatures = (start: DriverFeatureStart) => {
     const routes: Record<DriverFeatureStart, string> = {
@@ -1483,12 +1595,12 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       case "home": return <HomeScreen onEmergency={beginEmergency} onNavigate={openDriverFeatures} onProfile={() => navigate("/app/profile")} />;
       case "profile": return <ProfileScreen onEmergency={beginEmergency} onHome={() => navigate("/app/home")} onNavigate={openDriverFeatures} setTheme={setTheme} theme={theme} />;
       case "need": return <NeedScreen onBack={() => navigate("/app/home")} onContinue={() => advanceEmergency(["locating"], "location")} onSelect={setSelectedProblem} selected={selectedProblem} />;
-      case "location": return <LocationScreen onBack={() => setScreen("need")} onContinue={() => advanceEmergency(["searching"], "searching")} onDenied={() => setScenario("location-denied")} />;
+      case "location": return <LocationScreen onBack={() => setScreen("need")} onContinue={() => { if (geo.point) setRequestLocation({ ...geo.point, label: geo.point.label ?? "Current location" }); advanceEmergency(["searching"], "searching"); }} onDenied={() => setScenario("location-denied")} location={requestLocation ?? geo.point} loading={geo.loading} error={geo.error} onRefresh={() => geo.request()} />;
       case "searching": return <SearchingScreen onCancel={() => { setScreen("home"); setSelectedProblem(""); }} onFound={() => advanceEmergency(["results"], "results")} />;
       case "results": return <ProviderResults onBack={() => setScreen("location")} onSelect={() => advanceEmergency(["confirming"], "confirm")} />;
       case "confirm": return <ConfirmScreen onBack={() => setScreen("results")} onConfirm={() => advanceEmergency(["requested"], "sent")} />;
       case "sent": return <SentScreen onContinue={() => advanceEmergency(["matched", "enRoute"], "tracking")} />;
-      case "tracking": return <TrackingScreen onArrived={() => advanceEmergency(["nearby", "arrived"], "arrived")} onScenario={setScenario} />;
+      case "tracking": return <TrackingScreen onArrived={() => advanceEmergency(["nearby", "arrived"], "arrived")} onScenario={setScenario} request={liveRequest} userLocation={requestLocation ?? geo.point} error={trackingError} onRefresh={() => { const id = backendRequestId.current; if (id) void requestService.get(id).then(setLiveRequest).catch((e) => setTrackingError(e instanceof Error ? e.message : "Could not refresh tracking.")); }} />;
       case "arrived": return <ArrivedScreen onEstimate={() => advanceEmergency(["diagnosing", "awaitingApproval"], "estimate")} />;
       case "estimate": return <EstimateScreen onApprove={() => advanceEmergency(["repairing", "completed", "paying"], "payment")} onBack={() => setScreen("arrived")} />;
       case "payment": return <PaymentScreen onPaid={() => advanceEmergency(["paid"], "rating")} />;
@@ -1496,7 +1608,7 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       case "complete": return <CompleteScreen onHome={() => setScreen("home")} />;
       default: return null;
     }
-  }, [emergencyRequest, navigate, scenario, screen, selectedProblem, theme]);
+  }, [emergencyRequest, geo.error, geo.loading, geo.point, liveRequest, navigate, requestLocation, scenario, screen, selectedProblem, theme, trackingError]);
 
   return content;
 }
