@@ -17,7 +17,8 @@ export default function App() {
       await hydrate();
       setReady(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The API session could not be restored.");
+      const message = cause instanceof Error ? cause.message.trim() : "";
+      setError(message || "We couldn't restore your session. Check your connection and try again.");
     }
   }
 
@@ -27,8 +28,11 @@ export default function App() {
 
   if (error) {
     return (
-      <main className="startup-error">
-        <p>{error}</p>
+      <main className="startup-error" role="alert">
+        <div>
+          <strong>We couldn’t start MechNow.</strong>
+          <p>{error}</p>
+        </div>
         <button onClick={() => void restoreSession()} type="button">Try again</button>
       </main>
     );

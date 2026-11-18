@@ -11,11 +11,27 @@ npm run api
 npm run dev
 ```
 
-The API listens on `127.0.0.1:3001`; Vite proxies `/api` requests to it. SQLite data is stored in `data/mechnow.sqlite` by default. Override `DATABASE_PATH` or `API_PORT` as needed.
+The API listens on `127.0.0.1:8787`; Vite proxies `/api` requests to it. SQLite data is stored in `data/mechnow.sqlite` by default. Override `DATABASE_PATH` or `API_PORT` as needed.
 
 ## Install on a phone
 
-The production client is an installable Progressive Web App (PWA). Deploy it to a public HTTPS origin, then open the site on your phone. On Android, use the browser's **Install app** or **Add to Home screen** option. On iPhone, open the site in Safari and choose **Share → Add to Home Screen**. The app shell and static assets are cached for launching the interface offline; API-backed actions still need the API and an internet connection. Service-worker updates are applied by the browser.
+To install the app while this laptop acts as the server:
+
+```sh
+npm run build
+npm run api      # terminal 1: API on 127.0.0.1:8787
+npm run preview  # terminal 2: production client on :8443, proxying /api
+```
+
+Opening `http://<laptop-ip>:8443` on the phone works in a browser, but Chrome only offers **Install app** and only allows geolocation on HTTPS. To get a real install, expose the preview over HTTPS with a tunnel, for example:
+
+```sh
+cloudflared tunnel --url http://localhost:8443
+```
+
+Open the printed `https://….trycloudflare.com` address on the phone, then choose **Install app** (Android) or **Share → Add to Home Screen** (iPhone). The quick-tunnel address changes whenever the tunnel restarts, and the installed app only works while the laptop, the API and the tunnel stay running.
+
+For a permanent public deployment, build the client and host it on an HTTPS origin, then open the site on your phone. The app shell and static assets are cached for launching the interface offline; API-backed actions still need the API and an internet connection. Service-worker updates are applied by the browser.
 
 The frontend must be served from the site root because its manifest and service worker use `/` paths. Configure the production `/api` route to proxy to the Node API, and keep the API database on persistent storage. The current SQLite API and development OTP/SMS setup are not a production hosting/auth solution by themselves.
 
@@ -27,11 +43,11 @@ The Mapbox public token is sent to browsers by design. Restrict it to the app's 
 
 Emergency requests, including their optional latitude and longitude, are already saved to the signed-in user's SQLite record by the API; no separate map database is required. Coordinates are stored in the app only when the user saves the request; using Mapbox features sends address searches or selected coordinates to Mapbox for lookup.
 
-For deployment, set `NODE_ENV=production` and configure `APP_ORIGIN` (or comma-separated `APP_ORIGINS`) to the exact HTTPS origin serving the client. Route that origin's `/api` path to this server with a reverse proxy; production session cookies are marked `Secure`. Keep the database file and its backups private, use HTTPS, and apply normal database backup/retention controls.
+For deployment, set `NODE_ENV=production` and configure `CORS_ORIGINS` with the exact HTTPS origin serving the client. Route that origin's `/api` path to this server with a reverse proxy. Keep the database file and its backups private, use HTTPS, and apply normal database backup/retention controls. API responses include an `X-Request-Id` header and the same `requestId` in error bodies for support diagnostics.
 
 ## API
 
-All mutation requests require an allowed `Origin` and JSON bodies. Authenticated endpoints use an HttpOnly, SameSite=Lax session cookie; account data and records are scoped to that session.
+Requests with a body must send `Content-Type: application/json`, and browser mutation requests must come from an origin listed in `CORS_ORIGINS`. Authenticated endpoints use a bearer token stored by the client; account data and records are scoped to that session. The local Vite proxy rewrites tunnel origins to the first configured `CORS_ORIGINS` value so the phone-install flow keeps working.
 
 | Method | Path | Purpose |
 |---|---|---|

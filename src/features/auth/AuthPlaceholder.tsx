@@ -20,6 +20,26 @@ function homeFor(role: Role): string {
   return "/pro";
 }
 
+type PendingOtp = { phone?: string; name?: string; role?: Role; devCode?: string };
+
+const PENDING_KEY = "mechnow:otp-pending";
+
+function readPendingOtp(): PendingOtp | null {
+  try {
+    return JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? "null") as PendingOtp | null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingOtp() {
+  try {
+    sessionStorage.removeItem(PENDING_KEY);
+  } catch {
+    // Storage unavailable (private mode): nothing to clear.
+  }
+}
+
 export function AuthPlaceholder() {
   const theme = useAppStore((state) => state.theme);
   const signIn = useAppStore((state) => state.signIn);
@@ -27,13 +47,15 @@ export function AuthPlaceholder() {
   const { pathname, state: locationState } = useLocation();
   const view = pathname === "/signup" ? "signup" : pathname === "/verify" ? "verify" : "login";
 
-  const savedState = locationState as { name?: string; phone?: string; role?: Role; devCode?: string } | null;
-  const [name, setName] = useState(savedState?.name ?? "");
-  const [phone, setPhone] = useState(savedState?.phone ?? "");
-  const [role, setRole] = useState<Role>(savedState?.role ?? "driver");
-  const [otpPhone, setOtpPhone] = useState(savedState?.phone ?? "");
+  const savedState = locationState as PendingOtp | null;
+  // A reload on /verify loses router state, so fall back to the session copy.
+  const seed = savedState ?? (view === "verify" ? readPendingOtp() : null);
+  const [name, setName] = useState(seed?.name ?? "");
+  const [phone, setPhone] = useState(seed?.phone ?? "");
+  const [role, setRole] = useState<Role>(seed?.role ?? "driver");
+  const [otpPhone, setOtpPhone] = useState(seed?.phone ?? "");
   const [code, setCode] = useState("");
-  const [devCode, setDevCode] = useState<string | null>(savedState?.devCode ?? null);
+  const [devCode, setDevCode] = useState<string | null>(seed?.devCode ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [googleNotice, setGoogleNotice] = useState(false);
@@ -61,14 +83,21 @@ export function AuthPlaceholder() {
   const requestCode = () =>
     run(async () => {
       const result = await authService.requestOtp(phone);
+      const pending: PendingOtp = { phone, name, role, devCode: result.devCode };
+      try {
+        sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+      } catch {
+        // Storage unavailable; the router state below still carries the flow.
+      }
       setOtpPhone(phone);
       setDevCode(result.devCode ?? null);
-      navigate("/verify", { state: { phone, name, role, devCode: result.devCode } });
+      navigate("/verify", { state: pending });
     });
 
   const verify = (value: string) =>
     run(async () => {
       const session = await authService.verifyOtp({ phone: otpPhone || phone, code: value, name: name || undefined, role });
+      clearPendingOtp();
       await signIn(session.user);
       navigate(homeFor(session.user.role));
     });

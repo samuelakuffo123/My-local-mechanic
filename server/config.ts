@@ -18,6 +18,9 @@ export const config = {
     .map((value) => value.trim())
     .filter(Boolean),
 
+  // Only trust X-Forwarded-For when a reverse proxy you control sets it.
+  trustProxy: process.env.TRUST_PROXY === "true",
+
   sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? 24 * 14),
   otpTtlMinutes: Number(process.env.OTP_TTL_MINUTES ?? 5),
   otpMaxAttempts: Number(process.env.OTP_MAX_ATTEMPTS ?? 5),

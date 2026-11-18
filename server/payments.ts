@@ -44,7 +44,12 @@ export async function createIntent(
   if (!Number.isFinite(input.amountGhs) || input.amountGhs <= 0) throw badRequest("Enter a valid amount.");
   if (!["momo", "cash", "card"].includes(input.method)) throw badRequest("Choose a valid payment method.");
 
-  const existing = get<Record<string, unknown>>(`${SELECT} WHERE idempotency_key = ?`, [input.idempotencyKey]);
+  // An idempotency key is only unique per customer: another user replaying the
+  // same key must never receive this customer's payment.
+  const existing = get<Record<string, unknown>>(`${SELECT} WHERE idempotency_key = ? AND customer_id = ?`, [
+    input.idempotencyKey,
+    auth.userId,
+  ]);
   if (existing) return { payment: hydrate(existing), reused: true };
 
   const request = getRequestRaw(input.requestId);
@@ -152,13 +157,18 @@ export function listPayments(auth: AuthContext, requestId?: string) {
   const clause = requestId ? "WHERE request_id = ?" : "";
   const params = requestId ? [requestId] : [];
   const rows = all<Record<string, unknown>>(`${SELECT} ${clause} ORDER BY created_at DESC LIMIT 200`, params);
+  const provider =
+    auth.role === "admin" || auth.role === "driver"
+      ? null
+      : get<{ id: string }>("SELECT id FROM providers WHERE user_id = ?", [auth.userId]);
   return rows
     .map(hydrate)
     .filter((payment) => {
       if (!payment) return false;
       if (auth.role === "admin") return true;
-      if (auth.role === "driver") return payment.customerId === auth.userId;
-      return true;
+      if (payment.customerId === auth.userId) return true;
+      // Providers and vendors only see payments for their own jobs.
+      return Boolean(provider && payment.providerId === provider.id);
     });
 }
 

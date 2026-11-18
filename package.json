@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "api": "node server/api.mjs",
-    "test:api": "node --test server/api.test.mjs",
+    "api": "node server/index.ts",
+    "server": "node server/index.ts",
+    "test:api": "node --test \"server/tests/**/*.test.ts\"",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt",
-    "server": "node server/index.ts",
     "server:test": "node --test \"server/tests/**/*.test.ts\""
   },
   "dependencies": {

@@ -1,0 +1,329 @@
+.onboarding-page {
+  --onboarding-accent: #a9c0ff;
+  --onboarding-accent-strong: #6f95ff;
+  --onboarding-line: rgba(150, 175, 255, .22);
+  --onboarding-tint: rgba(95, 125, 255, .14);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 20px;
+  background: radial-gradient(circle at 50% -10%, var(--onboarding-tint), transparent 38%), var(--bg);
+  overflow: hidden;
+}
+
+[data-theme="light"] .onboarding-page {
+  --onboarding-accent: #1949b8;
+  --onboarding-accent-strong: #2458d8;
+  --onboarding-line: rgba(25, 73, 184, .16);
+  --onboarding-tint: transparent;
+}
+
+.onboarding-header {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.onboarding-header .brand-logo__image {
+  width: 128px;
+}
+
+.onboarding-skip {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 8px 0 8px 10px;
+  cursor: pointer;
+}
+
+.onboarding-skip:hover {
+  color: var(--onboarding-accent-strong);
+}
+
+.onboarding-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.onboarding-progress {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.onboarding-progress button {
+  flex: 1;
+  height: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  cursor: pointer;
+  transition: background-color 180ms, transform 180ms;
+}
+
+.onboarding-progress button:hover {
+  transform: scaleY(1.4);
+}
+
+.onboarding-progress button.complete {
+  background: var(--onboarding-accent);
+}
+
+.onboarding-progress button.active {
+  background: var(--brand-gradient);
+}
+
+.onboarding-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px 0 12px;
+  min-height: 0;
+}
+
+.onboarding-visual {
+  position: relative;
+  min-height: 224px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background: radial-gradient(circle at 50% 115%, var(--onboarding-tint), transparent 62%), var(--surface-2);
+  overflow: hidden;
+}
+
+.onboarding-visual__grid {
+  position: absolute;
+  inset: 0;
+  opacity: .42;
+  background-image: linear-gradient(var(--onboarding-line) 1px, transparent 1px), linear-gradient(90deg, var(--onboarding-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  transform: rotate(-8deg) scale(1.2);
+}
+
+.onboarding-visual__ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px dashed var(--onboarding-line);
+}
+
+.onboarding-visual__ring--outer {
+  width: 190px;
+  height: 190px;
+}
+
+.onboarding-visual__ring--inner {
+  width: 140px;
+  height: 140px;
+  border-style: solid;
+}
+
+.onboarding-visual__icon {
+  position: relative;
+  z-index: 2;
+  width: 104px;
+  height: 104px;
+  display: grid;
+  place-items: center;
+  border-radius: 32px;
+  background: var(--brand-gradient);
+  color: #ffffff;
+  box-shadow: 0 20px 38px rgba(42, 74, 150, .26);
+  transform: rotate(-6deg);
+}
+
+.onboarding-visual__icon svg {
+  transform: rotate(6deg);
+}
+
+[data-theme="light"] .onboarding-visual__icon {
+  color: #0b1020;
+}
+
+.onboarding-chip {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-2);
+  box-shadow: var(--shadow-1);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+
+.onboarding-chip--top {
+  top: 20px;
+  left: 18px;
+}
+
+.onboarding-chip--bottom {
+  right: 18px;
+  bottom: 20px;
+  color: var(--onboarding-accent);
+}
+
+.onboarding-copy {
+  margin-top: 22px;
+  animation: onboarding-copy-in 300ms var(--ease-out) both;
+}
+
+.onboarding-kicker {
+  display: block;
+  color: var(--onboarding-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.onboarding-title {
+  margin-top: 10px;
+  font-size: clamp(28px, 8vw, 36px);
+  line-height: 1.08;
+  letter-spacing: -.045em;
+  outline: none;
+}
+
+.onboarding-copy p {
+  max-width: 34ch;
+  margin-top: 11px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.onboarding-actions {
+  margin-top: auto;
+  padding-top: 8px;
+  display: grid;
+  gap: 10px;
+}
+
+.onboarding-action-row {
+  display: flex;
+  gap: 10px;
+}
+
+.onboarding-back {
+  width: 52px;
+  min-height: 52px;
+  flex: 0 0 52px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-1);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.onboarding-continue {
+  flex: 1;
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--brand-gradient);
+  color: #ffffff;
+  box-shadow: 0 14px 26px rgba(42, 74, 150, .24);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 120ms;
+}
+
+[data-theme="light"] .onboarding-continue {
+  color: #0b1020;
+}
+
+.onboarding-continue:active,
+.onboarding-back:active {
+  transform: scale(.98);
+}
+
+.onboarding-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.onboarding-footer button {
+  border: 0;
+  background: transparent;
+  color: var(--onboarding-accent);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px;
+  cursor: pointer;
+}
+
+@keyframes onboarding-copy-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (min-width: 480px) {
+  .onboarding-page {
+    min-height: calc(100% - 28px);
+  }
+}
+
+@media (max-height: 720px) {
+  .onboarding-page {
+    padding-top: 12px;
+    padding-bottom: 14px;
+  }
+
+  .onboarding-stage {
+    padding: 12px 0 8px;
+  }
+
+  .onboarding-visual {
+    min-height: 190px;
+  }
+
+  .onboarding-visual__icon {
+    width: 88px;
+    height: 88px;
+    border-radius: 28px;
+  }
+
+  .onboarding-visual__icon svg {
+    width: 44px;
+    height: 44px;
+  }
+
+  .onboarding-copy {
+    margin-top: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-copy {
+    animation: none;
+  }
+}

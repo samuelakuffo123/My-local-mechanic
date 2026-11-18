@@ -1,7 +1,7 @@
 import { get as httpGet, post, patch, del, type RequestContext } from "./http.ts";
 import { run } from "./db.ts";
-import { nowIso } from "./util.ts";
-import { unauthorized, badRequest } from "./errors.ts";
+import { normalisePhone, nowIso, rateLimit } from "./util.ts";
+import { unauthorized, badRequest, notFound, tooMany } from "./errors.ts";
 import * as auth from "./auth.ts";
 import * as vehicles from "./vehicles.ts";
 import * as providers from "./providers.ts";
@@ -11,7 +11,18 @@ import * as payments from "./payments.ts";
 import * as disputes from "./disputes.ts";
 import * as notifications from "./notifications.ts";
 import * as admin from "./admin.ts";
-import { asObject, enumValue, optionalArray, optionalString, requireNumber, requireString } from "./validation.ts";
+import {
+  asObject,
+  enumValue,
+  optionalArray,
+  optionalEnumValue,
+  optionalPhone,
+  optionalString,
+  requireNumber,
+  requireOtpCode,
+  requirePhone,
+  requireString,
+} from "./validation.ts";
 import type { AuthContext } from "./http.ts";
 import type { RequestStatus } from "./stateMachine.ts";
 
@@ -32,19 +43,24 @@ export function registerRoutes() {
   // --- Auth --------------------------------------------------------------
   post("/api/auth/otp/request", async (context) => {
     const body = asObject(context.body);
-    return auth.requestOtp(requireString(body, "phone"), context.ip);
+    return auth.requestOtp(requirePhone(body), context.ip);
   }, true);
 
   post("/api/auth/verify", (context) => {
     const body = asObject(context.body);
-    const name = optionalString(body, "name");
-    const role = optionalString(body, "role") as AuthContext["role"] | undefined;
-    return auth.verifyOtp(requireString(body, "phone"), requireString(body, "code"), { name, role });
+    const name = optionalString(body, "name", { max: 80 });
+    const role = optionalEnumValue(body, "role", ["driver", "mechanic", "tow", "vendor"] as const);
+    return auth.verifyOtp(requirePhone(body), requireOtpCode(body), { name, role });
   }, true);
 
   post("/api/auth/login", (context) => {
     const body = asObject(context.body);
-    const userId = auth.checkPassword(requireString(body, "phone"), requireString(body, "password"));
+    const phone = requirePhone(body);
+    const password = requireString(body, "password", { max: 128 });
+    // Throttle before touching the password hash so guesses are cheap to reject.
+    if (!rateLimit(`login:ip:${context.ip}`, 40, 15 * 60_000)) throw tooMany();
+    if (!rateLimit(`login:id:${normalisePhone(phone)}`, 10, 15 * 60_000)) throw tooMany();
+    const userId = auth.checkPassword(phone, password);
     if (!userId) throw unauthorized("Incorrect phone number or password.");
     return auth.createSession(userId);
   }, true);
@@ -67,8 +83,13 @@ export function registerRoutes() {
     const body = asObject(context.body);
     const user = auth.getUser(current.userId);
     if (!user) throw unauthorized();
-    const name = optionalString(body, "name") ?? user.name;
-    const email = optionalString(body, "email") ?? user.email;
+    const name = (optionalString(body, "name", { max: 80 }) ?? user.name).trim();
+    if (!name) throw badRequest("Name is required.", { field: "name" });
+    const emailInput = optionalString(body, "email", { max: 254 });
+    const email = emailInput === undefined ? user.email : emailInput.trim() || null;
+    if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      throw badRequest("Enter a valid email address.", { field: "email" });
+    }
     run("UPDATE users SET name = ?, email = ?, updated_at = ? WHERE id = ?", [name, email, nowIso(), current.userId]);
     return auth.getUser(current.userId);
   });
@@ -76,14 +97,23 @@ export function registerRoutes() {
   post("/api/me/password", (context) => {
     const current = requireAuth(context);
     const body = asObject(context.body);
-    auth.setPassword(current.userId, requireString(body, "password", { min: 8, max: 128 }));
+    const next = requireString(body, "password", { min: 8, max: 128 });
+    // An existing password must be confirmed before it can be replaced.
+    if (auth.hasPassword(current.userId)) {
+      const currentPassword = optionalString(body, "currentPassword");
+      if (!currentPassword) throw badRequest("Enter your current password.", { field: "currentPassword" });
+      if (!auth.checkPasswordById(current.userId, currentPassword)) {
+        throw unauthorized("Your current password is incorrect.");
+      }
+    }
+    auth.setPassword(current.userId, next);
     return { ok: true };
   });
 
   // --- Vehicles ----------------------------------------------------------
   httpGet("/api/vehicles", (context) => ({ items: vehicles.listVehicles(requireAuth(context).userId) }));
   post("/api/vehicles", (context) => vehicles.createVehicle(requireAuth(context), asObject(context.body)));
-  httpGet("/api/vehicles/:id", (context) => vehicles.getVehicle(context.params.id));
+  httpGet("/api/vehicles/:id", (context) => vehicles.getVehicleForUser(requireAuth(context), context.params.id));
   patch("/api/vehicles/:id", (context) => vehicles.updateVehicle(requireAuth(context), context.params.id, asObject(context.body)));
   del("/api/vehicles/:id", (context) => vehicles.deleteVehicle(requireAuth(context), context.params.id));
   httpGet("/api/vehicles/:id/history", (context) => ({ items: requests.serviceHistory(requireAuth(context), context.params.id) }));
@@ -130,8 +160,16 @@ export function registerRoutes() {
   });
 
   httpGet("/api/providers/:id", (context) => {
+    const current = requireAuth(context);
     const provider = providers.getProviderById(context.params.id);
-    return { provider, credentials: provider ? providers.providerCredentials(provider.id) : [] };
+    if (!provider) throw notFound("Provider not found.");
+    // Identity documents are private: only the provider themselves or an admin.
+    const viewerProfile = providers.getProviderForUser(current.userId);
+    const canSeeCredentials = current.role === "admin" || viewerProfile?.id === provider.id;
+    return {
+      provider,
+      credentials: canSeeCredentials ? providers.providerCredentials(provider.id) : [],
+    };
   });
 
   // --- Service requests --------------------------------------------------
@@ -173,6 +211,25 @@ export function registerRoutes() {
     return requests.cancelRequest(requireAuth(context), context.params.id, optionalString(body, "reason") ?? "");
   });
 
+  post("/api/service-requests/:id/location", (context) => {
+    const body = asObject(context.body);
+    const rawLat = body.lat;
+    const rawLng = body.lng;
+    const lat = rawLat == null || rawLat === "" ? undefined : Number(rawLat);
+    const lng = rawLng == null || rawLng === "" ? undefined : Number(rawLng);
+    if (lat !== undefined && (!Number.isFinite(lat) || lat < -90 || lat > 90)) {
+      throw badRequest("Latitude must be a number between -90 and 90.", { field: "lat" });
+    }
+    if (lng !== undefined && (!Number.isFinite(lng) || lng < -180 || lng > 180)) {
+      throw badRequest("Longitude must be a number between -180 and 180.", { field: "lng" });
+    }
+    return requests.updateRequestLocation(requireAuth(context), context.params.id, {
+      label: optionalString(body, "label", { max: 160 }),
+      lat,
+      lng,
+    });
+  });
+
   // --- Estimates ---------------------------------------------------------
   post("/api/service-requests/:id/estimates", (context) => {
     const body = asObject(context.body);
@@ -195,7 +252,7 @@ export function registerRoutes() {
       amountGhs: requireNumber(body, "amountGhs", { min: 0.01 }),
       method: enumValue(body, "method", ["momo", "cash", "card"] as const),
       idempotencyKey: requireString(body, "idempotencyKey"),
-      customerPhone: optionalString(body, "customerPhone"),
+      customerPhone: optionalPhone(body, "customerPhone"),
     });
   });
   httpGet("/api/payments", (context) => ({ items: payments.listPayments(requireAuth(context), queryValue(context, "requestId")) }));
@@ -206,9 +263,9 @@ export function registerRoutes() {
     return payments.requestRefund(requireAuth(context), context.params.id, requireNumber(body, "amountGhs", { min: 0.01 }), requireString(body, "reason"));
   });
   post("/api/payments/webhook/:provider", (context) => {
-    const raw = JSON.stringify(context.body ?? {});
+    // Verify the signature over the exact bytes received, not a re-serialisation.
     const signature = context.req.headers["x-paystack-signature"];
-    return payments.handleWebhook(context.params.provider, raw, typeof signature === "string" ? signature : undefined);
+    return payments.handleWebhook(context.params.provider, context.rawBody, typeof signature === "string" ? signature : undefined);
   }, true);
 
   // --- Disputes ----------------------------------------------------------
@@ -237,15 +294,30 @@ export function registerRoutes() {
 
   // --- Admin -------------------------------------------------------------
   httpGet("/api/admin/metrics", (context) => admin.requireAdmin(requireAuth(context), admin.platformMetrics));
-  httpGet("/api/admin/dispatch", (context) => admin.requireAdmin(requireAuth(context), admin.dispatchMonitor));
-  httpGet("/api/admin/audit", (context) => admin.requireAdmin(requireAuth(context), () => admin.listAuditLogs(Number(queryValue(context, "limit") ?? 100))));
-  httpGet("/api/admin/users", (context) => admin.requireAdmin(requireAuth(context), () => auth.listUsers(queryValue(context, "role") as AuthContext["role"] | undefined)));
+  httpGet("/api/admin/dispatch", (context) =>
+    admin.requireAdmin(requireAuth(context), () => ({ items: admin.dispatchMonitor() })),
+  );
+  httpGet("/api/admin/audit", (context) => {
+    const requested = Number(queryValue(context, "limit") ?? 100);
+    const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 100, 1), 500);
+    return admin.requireAdmin(requireAuth(context), () => ({ items: admin.listAuditLogs(limit) }));
+  });
+  httpGet("/api/admin/users", (context) =>
+    admin.requireAdmin(requireAuth(context), () => ({ items: auth.listUsers(queryValue(context, "role") as AuthContext["role"] | undefined) })),
+  );
   httpGet("/api/admin/requests", (context) =>
     admin.requireAdmin(requireAuth(context), () => admin.allRequests(queryValue(context, "status"))),
   );
-  httpGet("/api/admin/providers", (context) =>
-    admin.requireAdmin(requireAuth(context), () => providers.listProvidersByStatus((queryValue(context, "status") as never) ?? ("pending" as never))),
-  );
+  const PROVIDER_STATUSES = ["pending", "verified", "rejected", "suspended"] as const;
+  httpGet("/api/admin/providers", (context) => {
+    const requested = queryValue(context, "status") ?? "pending";
+    if (!(PROVIDER_STATUSES as readonly string[]).includes(requested)) {
+      throw badRequest("Choose a valid provider status: pending, verified, rejected, or suspended.", { field: "status" });
+    }
+    return admin.requireAdmin(requireAuth(context), () => ({
+      items: providers.listProvidersByStatus(requested as (typeof PROVIDER_STATUSES)[number]),
+    }));
+  });
   post("/api/admin/providers/:id/verify", (context) => {
     const current = requireAuth(context);
     admin.assertAdmin(current);
@@ -254,7 +326,9 @@ export function registerRoutes() {
   });
   httpGet("/api/admin/credentials/expiring", (context) => {
     const days = Number(queryValue(context, "days") ?? 30);
-    return admin.requireAdmin(requireAuth(context), () => providers.expiringCredentials(Number.isFinite(days) ? days : 30));
+    return admin.requireAdmin(requireAuth(context), () => ({
+      items: providers.expiringCredentials(Number.isFinite(days) ? days : 30),
+    }));
   });
   post("/api/admin/credentials/suspend-expired", (context) => admin.requireAdmin(requireAuth(context), () => ({ suspended: providers.suspendExpiredProviders() })));
 }

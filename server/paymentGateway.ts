@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { config, devPaymentsEnabled, isProduction } from "./config.ts";
 
 // Payment gateway boundary. The platform never trusts the client to declare a
@@ -109,10 +109,19 @@ const paystackGateway: PaymentGateway = {
     return { providerRef: input.providerRef, status: response.ok ? "processed" : "failed" };
   },
   verifyWebhook(rawBody, signature) {
-    if (!config.paystackWebhookSecret || !signature) return false;
-    // Paystack signs with HMAC SHA512 of the raw body using the secret key.
-    const expected = createHmac("sha512", config.paystackSecretKey).update(rawBody).digest("hex");
-    return expected === signature;
+    // Paystack signs the RAW request body with HMAC-SHA512 using the secret key.
+    // The signature must be compared over the untouched bytes, constant-time.
+    const secret = config.paystackWebhookSecret || config.paystackSecretKey;
+    if (!secret || !signature) return false;
+    const expected = createHmac("sha512", secret).update(rawBody, "utf8").digest();
+    let provided: Buffer;
+    try {
+      provided = Buffer.from(signature.trim(), "hex");
+    } catch {
+      return false;
+    }
+    if (provided.length !== expected.length) return false;
+    return timingSafeEqual(provided, expected);
   },
   parseWebhook(rawBody) {
     const parsed = JSON.parse(rawBody || "{}") as { data?: { reference?: string; status?: string } };
