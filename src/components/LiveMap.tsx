@@ -65,8 +65,8 @@ export function LiveMap({ user, provider, destination, route = null, followUser 
     map.on("load", () => {
       if (!map.getSource("route-line")) {
         map.addSource("route-line", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [] } } });
-        map.addLayer({ id: "route-line-casing", type: "line", source: "route-line", paint: { "line-color": "#1e3a8a", "line-width": 7, "line-opacity": 0.35 } });
-        map.addLayer({ id: "route-line", type: "line", source: "route-line", paint: { "line-color": "#2f6bff", "line-width": 4, "line-opacity": 0.9 } });
+        map.addLayer({ id: "route-line-casing", type: "line", source: "route-line", paint: { "line-color": "#0a0d3a", "line-width": 8, "line-opacity": 0.5 } });
+        map.addLayer({ id: "route-line", type: "line", source: "route-line", paint: { "line-color": "#5865f2", "line-width": 4, "line-opacity": 0.95 } });
       }
     });
     mapRef.current = map;

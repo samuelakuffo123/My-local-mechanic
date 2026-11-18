@@ -108,6 +108,9 @@ export function OnboardingScreen() {
         <section className="onboarding-stage" aria-live="polite">
           <div className={`onboarding-visual onboarding-visual--${slide.key}`}>
             <div aria-hidden="true" className="onboarding-visual__grid" />
+            <div aria-hidden="true" className="onboarding-visual__route" />
+            <span aria-hidden="true" className="onboarding-visual__waypoint onboarding-visual__waypoint--start" />
+            <span aria-hidden="true" className="onboarding-visual__waypoint onboarding-visual__waypoint--end" />
             <div aria-hidden="true" className="onboarding-visual__ring onboarding-visual__ring--outer" />
             <div aria-hidden="true" className="onboarding-visual__ring onboarding-visual__ring--inner" />
             <div className="onboarding-visual__icon">
