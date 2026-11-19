@@ -3,20 +3,39 @@
 //
 // Ghana-first defaults: Africa/Accra timezone, GHS currency, GMT offset.
 
+// Node 22+ can read a local .env file directly. Explicit process environment
+// values still win, which keeps deployed secrets injectable by the platform.
+try {
+  process.loadEnvFile(".env");
+} catch {
+  // A .env file is optional; deployments normally inject variables directly.
+}
+
+// Comma-separated allowlist, plus the platform's own public URL when it exposes
+// one. A single-service deploy calls its own origin, and browsers send Origin on
+// POST/PATCH/DELETE, so the deployed origin must be allowed automatically.
+const configuredOrigins = (process.env.CORS_ORIGINS ?? "http://localhost:8443,http://127.0.0.1:8443")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const platformOrigin =
+  process.env.PUBLIC_ORIGIN?.trim() ||
+  process.env.RENDER_EXTERNAL_URL?.trim() ||
+  (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}` : "");
+const corsOrigins = [...new Set([...configuredOrigins, platformOrigin].filter(Boolean))];
+
 export const config = {
   env: process.env.NODE_ENV ?? "development",
-  port: Number(process.env.API_PORT ?? 8787),
-  host: process.env.API_HOST ?? "127.0.0.1",
+  // Render/Railway inject PORT; API_PORT stays supported for local runs.
+  port: Number(process.env.API_PORT ?? process.env.PORT ?? 8787),
+  host: process.env.API_HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
 
   // SQLite file for local/dev. In production point DATABASE_URL at Postgres
   // through the storage adapter (see server/db.ts migration notes).
   databasePath: process.env.DATABASE_PATH ?? ".data/mechnow.sqlite",
 
   // Comma-separated list of allowed browser origins.
-  corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:8443,http://127.0.0.1:8443")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean),
+  corsOrigins,
 
   // Only trust X-Forwarded-For when a reverse proxy you control sets it.
   trustProxy: process.env.TRUST_PROXY === "true",
@@ -36,6 +55,12 @@ export const config = {
   // SMS/WhatsApp provider before production.
   smsProvider: process.env.SMS_PROVIDER ?? "console",
   smsSenderId: process.env.SMS_SENDER_ID ?? "MechNow",
+
+  // Google Identity Services token model. The web client ID is public by
+  // design; no client secret is required because access tokens are verified
+  // against Google's tokeninfo endpoint on the server.
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
+  googleTokenInfoUrl: process.env.GOOGLE_TOKENINFO_URL ?? "https://oauth2.googleapis.com/tokeninfo",
 
   seedDemoData: process.env.SEED_DEMO_DATA === "true",
   timezone: "Africa/Accra",

@@ -255,6 +255,39 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX idx_audit_entity ON audit_logs(entity_type, entity_id);
     `,
   },
+  {
+    version: 2,
+    name: "oauth_accounts",
+    sql: `
+      CREATE TABLE oauth_accounts (
+        provider TEXT NOT NULL CHECK (provider IN ('google')),
+        provider_subject TEXT NOT NULL,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        email TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, provider_subject)
+      );
+      CREATE INDEX idx_oauth_user ON oauth_accounts(user_id);
+    `,
+  },
+  {
+    version: 3,
+    name: "user_avatar",
+    sql: `ALTER TABLE users ADD COLUMN avatar_data_url TEXT;`,
+  },
+  {
+    version: 4,
+    name: "map_locations",
+    sql: `
+      ALTER TABLE providers ADD COLUMN lat REAL;
+      ALTER TABLE providers ADD COLUMN lng REAL;
+      ALTER TABLE providers ADD COLUMN address TEXT;
+      ALTER TABLE service_requests ADD COLUMN provider_lat REAL;
+      ALTER TABLE service_requests ADD COLUMN provider_lng REAL;
+      ALTER TABLE service_requests ADD COLUMN provider_location_at TEXT;
+    `,
+  },
 ];
 
 function migrate(handle: DatabaseSync) {

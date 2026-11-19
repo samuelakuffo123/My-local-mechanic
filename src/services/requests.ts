@@ -21,6 +21,7 @@ export interface RequestService {
   transition(id: string, to: RequestStatus, note?: string): Promise<ServiceRequest>;
   cancel(id: string, reason: string): Promise<ServiceRequest>;
   updateLocation(id: string, location: { label?: string; lat?: number; lng?: number }): Promise<ServiceRequest>;
+  publishLocation(id: string, location: { lat: number; lng: number }): Promise<ServiceRequest>;
   events(id: string): Promise<RequestEvent[]>;
   actions(id: string): Promise<RequestStatus[]>;
 }
@@ -35,6 +36,7 @@ const serverRequests: RequestService = {
   transition: (id, to, note) => apiRequest<ServiceRequest>(`/service-requests/${id}/transition`, { method: "POST", body: { to, note } }),
   cancel: (id, reason) => apiRequest<ServiceRequest>(`/service-requests/${id}/cancel`, { method: "POST", body: { reason } }),
   updateLocation: (id, location) => apiRequest<ServiceRequest>(`/service-requests/${id}/location`, { method: "POST", body: location }),
+  publishLocation: (id, location) => apiRequest<ServiceRequest>(`/service-requests/${id}/provider-location`, { method: "POST", body: location }),
   events: async (id) => (await apiRequest<{ items: RequestEvent[] }>(`/service-requests/${id}/events`)).items,
   actions: async (id) => (await apiRequest<{ actions: RequestStatus[] }>(`/service-requests/${id}/actions`)).actions,
 };
@@ -69,6 +71,7 @@ const localRequests: RequestService = {
       kind: input.kind,
       problem: input.problem,
       location: { label: input.location?.label ?? null, lat: input.location?.lat ?? null, lng: input.location?.lng ?? null },
+      providerLocation: null,
       region: input.region ?? null,
       status: "requested",
       version: 0,
@@ -90,7 +93,16 @@ const localRequests: RequestService = {
     return found;
   },
   assign: async (id, providerId) => patch(id, { providerId }),
-  accept: async (id) => patch(id, { status: "accepted" }),
+  accept: async (id) => {
+    const current = read().find((item) => item.id === id);
+    if (!current) throw new Error("Request not found.");
+    const origin = current.location;
+    const providerLocation =
+      origin.lat != null && origin.lng != null
+        ? { lat: origin.lat + 0.012, lng: origin.lng - 0.011, updatedAt: new Date().toISOString() }
+        : null;
+    return patch(id, { status: "accepted", providerLocation });
+  },
   decline: async (id) => patch(id, { providerId: null }),
   transition: async (id, to) => patch(id, { status: to }),
   cancel: async (id, reason) => patch(id, { status: "cancelled", cancellationReason: reason }),
@@ -105,6 +117,8 @@ const localRequests: RequestService = {
       },
     });
   },
+  publishLocation: async (id, location) =>
+    patch(id, { providerLocation: { ...location, updatedAt: new Date().toISOString() } }),
   events: async () => [],
   actions: async () => [],
 };

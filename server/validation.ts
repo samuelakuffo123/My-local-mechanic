@@ -3,6 +3,13 @@ import { isValidPhone, normalisePhone } from "./util.ts";
 
 export type Body = Record<string, unknown>;
 
+const MAX_AVATAR_BYTES = 160 * 1024;
+const AVATAR_SIGNATURES: Record<string, string> = {
+  jpeg: "/9j/",
+  png: "iVBORw0KGgo",
+  webp: "UklGR",
+};
+
 const FIELD_LABELS: Record<string, string> = {
   phone: "Phone number",
   customerPhone: "Customer phone number",
@@ -102,6 +109,32 @@ export function optionalBoolean(body: Body, key: string): boolean | undefined {
   if (value === "true") return true;
   if (value === "false") return false;
   throw fieldError(`${label(key)} must be true or false.`, key);
+}
+
+/**
+ * Accepts a compact image data URL produced by the client's canvas resizer.
+ * Keeping this as a data URL avoids introducing an unauthenticated file-serving
+ * route while still letting the avatar survive reloads and new devices.
+ */
+export function optionalAvatarDataUrl(body: Body, key = "avatarUrl"): string | null | undefined {
+  const value = body[key];
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") throw fieldError("Choose a JPG, PNG, or WebP image.", key);
+  if (value.length > 230_000) throw fieldError("That photo is too large. Choose a smaller image.", key);
+
+  const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match) throw fieldError("Choose a JPG, PNG, or WebP image.", key);
+  const [, format, encoded] = match;
+  if (!encoded.startsWith(AVATAR_SIGNATURES[format])) {
+    throw fieldError("That image file doesn't match its type. Choose another photo.", key);
+  }
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  const decodedBytes = Math.floor((encoded.length * 3) / 4) - padding;
+  if (!decodedBytes || decodedBytes > MAX_AVATAR_BYTES) {
+    throw fieldError("Choose a photo smaller than 160 KB.", key);
+  }
+  return value;
 }
 
 export function enumValue<T extends string>(body: Body, key: string, allowed: readonly T[]): T {

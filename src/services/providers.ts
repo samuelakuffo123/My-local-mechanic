@@ -1,6 +1,6 @@
 import { apiRequest } from "./http";
 import { bridge } from "./bridge";
-import type { ProviderProfile, RequestKind } from "./apiTypes";
+import type { NearbyProvider, ProviderProfile, RequestKind } from "./apiTypes";
 
 export interface ProviderCredential {
   id: string;
@@ -22,6 +22,7 @@ export interface ProviderApplyInput {
 
 export interface ProviderService {
   list(kind?: RequestKind, region?: string): Promise<ProviderProfile[]>;
+  nearby(input: { lat?: number | null; lng?: number | null; radiusKm?: number; type?: ProviderProfile["type"] }): Promise<NearbyProvider[]>;
   get(id: string): Promise<ProviderProfile | null>;
   me(): Promise<{ provider: ProviderProfile | null; credentials: ProviderCredential[] }>;
   apply(input: ProviderApplyInput): Promise<ProviderProfile>;
@@ -37,6 +38,13 @@ const serverProviders: ProviderService = {
     const params = new URLSearchParams({ kind });
     if (region) params.set("region", region);
     return (await apiRequest<{ items: ProviderProfile[] }>(`/providers?${params.toString()}`)).items;
+  },
+  nearby: async ({ lat, lng, radiusKm = 40, type }) => {
+    const params = new URLSearchParams({ radiusKm: String(radiusKm) });
+    if (typeof lat === "number") params.set("lat", String(lat));
+    if (typeof lng === "number") params.set("lng", String(lng));
+    if (type) params.set("type", type);
+    return (await apiRequest<{ items: NearbyProvider[] }>(`/providers/nearby?${params.toString()}`)).items;
   },
   get: async (id) => (await apiRequest<{ provider: ProviderProfile | null }>(`/providers/${id}`)).provider,
   me: () => apiRequest<{ provider: ProviderProfile | null; credentials: ProviderCredential[] }>("/providers/me"),
@@ -63,6 +71,12 @@ const localProviders: ProviderService = {
     const provider = readLocal();
     return provider && provider.status === "verified" && provider.available ? [provider] : [];
   },
+  nearby: async () => {
+    const provider = readLocal();
+    return provider && provider.status === "verified" && provider.lat != null && provider.lng != null
+      ? [{ ...provider, distanceKm: null }]
+      : [];
+  },
   get: async () => readLocal(),
   me: async () => ({ provider: readLocal(), credentials: [] }),
   apply: async (input) => {
@@ -78,6 +92,9 @@ const localProviders: ProviderService = {
       available: readLocal()?.available ?? false,
       rating: 0,
       reliability: 0,
+      lat: readLocal()?.lat ?? null,
+      lng: readLocal()?.lng ?? null,
+      address: readLocal()?.address ?? null,
     };
     localStorage.setItem(LOCAL_KEY, JSON.stringify(provider));
     return provider;

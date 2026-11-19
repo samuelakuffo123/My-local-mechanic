@@ -1,4 +1,5 @@
 import { get as httpGet, post, patch, del, type RequestContext } from "./http.ts";
+import { config } from "./config.ts";
 import { run } from "./db.ts";
 import { normalisePhone, nowIso, rateLimit } from "./util.ts";
 import { unauthorized, badRequest, notFound, tooMany } from "./errors.ts";
@@ -15,7 +16,9 @@ import {
   asObject,
   enumValue,
   optionalArray,
+  optionalAvatarDataUrl,
   optionalEnumValue,
+  optionalNumber,
   optionalPhone,
   optionalString,
   requireNumber,
@@ -65,6 +68,22 @@ export function registerRoutes() {
     return auth.createSession(userId);
   }, true);
 
+  httpGet("/api/auth/google/config", () => ({
+    enabled: Boolean(config.googleClientId),
+    clientId: config.googleClientId || null,
+  }), true);
+
+  post("/api/auth/google", async (context) => {
+    if (!config.googleClientId) throw badRequest("Google sign-in isn't configured on this server.");
+    const body = asObject(context.body);
+    const accessToken = requireString(body, "accessToken", { min: 10, max: 4096 });
+    const role = optionalEnumValue(body, "role", ["driver", "mechanic", "tow", "vendor"] as const);
+    if (!rateLimit(`google:ip:${context.ip}`, 30, 15 * 60_000)) {
+      throw tooMany("Too many Google sign-in attempts. Try again later.");
+    }
+    return auth.signInWithGoogle(accessToken, { role });
+  }, true);
+
   post("/api/auth/logout", (context) => {
     requireAuth(context);
     const header = context.req.headers.authorization;
@@ -90,7 +109,15 @@ export function registerRoutes() {
     if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
       throw badRequest("Enter a valid email address.", { field: "email" });
     }
-    run("UPDATE users SET name = ?, email = ?, updated_at = ? WHERE id = ?", [name, email, nowIso(), current.userId]);
+    const avatarUrl = optionalAvatarDataUrl(body, "avatarUrl");
+    const nextAvatarUrl = avatarUrl === undefined ? user.avatarUrl : avatarUrl;
+    run("UPDATE users SET name = ?, email = ?, avatar_data_url = ?, updated_at = ? WHERE id = ?", [
+      name,
+      email,
+      nextAvatarUrl,
+      nowIso(),
+      current.userId,
+    ]);
     return auth.getUser(current.userId);
   });
 
@@ -133,6 +160,9 @@ export function registerRoutes() {
       type: enumValue(body, "type", ["mechanic", "tow", "vendor"] as const),
       region: optionalString(body, "region"),
       serviceAreas: optionalArray<string>(body, "serviceAreas"),
+      lat: optionalNumber(body, "lat"),
+      lng: optionalNumber(body, "lng"),
+      address: optionalString(body, "address", { max: 160 }),
     });
   });
 
@@ -157,6 +187,36 @@ export function registerRoutes() {
       documentRef: requireString(body, "documentRef"),
       expiresAt: optionalString(body, "expiresAt") ?? null,
     });
+  });
+
+  httpGet("/api/providers/nearby", (context) => {
+    const rawLat = queryValue(context, "lat");
+    const rawLng = queryValue(context, "lng");
+    const lat = rawLat == null || rawLat === "" ? null : Number(rawLat);
+    const lng = rawLng == null || rawLng === "" ? null : Number(rawLng);
+    if (lat != null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) {
+      throw badRequest("Latitude must be a number between -90 and 90.", { field: "lat" });
+    }
+    if (lng != null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) {
+      throw badRequest("Longitude must be a number between -180 and 180.", { field: "lng" });
+    }
+    const rawType = queryValue(context, "type");
+    if (rawType && !["mechanic", "tow", "vendor"].includes(rawType)) {
+      throw badRequest("Choose a valid provider type.", { field: "type" });
+    }
+    const rawRadius = queryValue(context, "radiusKm");
+    const radiusKm = rawRadius == null || rawRadius === "" ? 40 : Number(rawRadius);
+    if (!Number.isFinite(radiusKm) || radiusKm <= 0 || radiusKm > 200) {
+      throw badRequest("Radius must be between 1 and 200 km.", { field: "radiusKm" });
+    }
+    return {
+      items: providers.nearbyProviders({
+        lat,
+        lng,
+        radiusKm,
+        type: (rawType as "mechanic" | "tow" | "vendor" | undefined) ?? null,
+      }),
+    };
   });
 
   httpGet("/api/providers/:id", (context) => {
@@ -227,6 +287,14 @@ export function registerRoutes() {
       label: optionalString(body, "label", { max: 160 }),
       lat,
       lng,
+    });
+  });
+
+  post("/api/service-requests/:id/provider-location", (context) => {
+    const body = asObject(context.body);
+    return requests.publishProviderLocation(requireAuth(context), context.params.id, {
+      lat: requireNumber(body, "lat", { min: -90, max: 90 }),
+      lng: requireNumber(body, "lng", { min: -180, max: 180 }),
     });
   });
 

@@ -1,7 +1,7 @@
 import { ApiError } from "./mockApi";
 import { apiRequest, clearToken, getToken, setToken } from "./http";
 import { bridge } from "./bridge";
-import type { ProviderProfile, Role, Session, User } from "./apiTypes";
+import type { ProfileUpdate, ProviderProfile, Role, Session, User } from "./apiTypes";
 
 interface VerifyInput {
   phone: string;
@@ -16,18 +16,34 @@ interface RawUser {
   name: string;
   phone: string;
   email: string | null;
+  avatarUrl?: string | null;
 }
 
 function toUser(raw: RawUser): User {
-  return { id: raw.id, role: raw.role, name: raw.name, phone: raw.phone, email: raw.email ?? "" };
+  return {
+    id: raw.id,
+    role: raw.role,
+    name: raw.name,
+    phone: raw.phone,
+    email: raw.email ?? "",
+    avatarUrl: raw.avatarUrl ?? null,
+  };
+}
+
+export interface GoogleConfig {
+  enabled: boolean;
+  clientId: string | null;
 }
 
 export interface AuthService {
   requestOtp(phone: string): Promise<{ devCode?: string; expiresAt: string }>;
   verifyOtp(input: VerifyInput): Promise<Session>;
   login(phone: string, password: string): Promise<Session>;
+  googleConfig(): Promise<GoogleConfig>;
+  signInWithGoogle(accessToken: string, role?: Role): Promise<Session>;
   logout(): Promise<void>;
   me(): Promise<{ user: User; provider: ProviderProfile | null }>;
+  updateProfile(input: ProfileUpdate): Promise<User>;
 }
 
 const serverAuth: AuthService = {
@@ -46,6 +62,16 @@ const serverAuth: AuthService = {
     setToken(session.token);
     return { token: session.token, user: toUser(session.user) };
   },
+  googleConfig: () => apiRequest<GoogleConfig>("/auth/google/config", { auth: false }),
+  signInWithGoogle: async (accessToken, role) => {
+    const session = await apiRequest<{ token: string; user: RawUser }>("/auth/google", {
+      method: "POST",
+      auth: false,
+      body: { accessToken, role },
+    });
+    setToken(session.token);
+    return { token: session.token, user: toUser(session.user) };
+  },
   logout: async () => {
     try {
       await apiRequest("/auth/logout", { method: "POST" });
@@ -56,6 +82,10 @@ const serverAuth: AuthService = {
   me: async () => {
     const result = await apiRequest<{ user: RawUser; provider: ProviderProfile | null }>("/me");
     return { user: toUser(result.user), provider: result.provider };
+  },
+  updateProfile: async (input) => {
+    const user = await apiRequest<RawUser>("/me", { method: "PATCH", body: input });
+    return toUser(user);
   },
 };
 
@@ -69,7 +99,8 @@ interface LocalAccount extends User {
 
 function readAccounts(): LocalAccount[] {
   try {
-    return JSON.parse(localStorage.getItem(LOCAL_ACCOUNTS) ?? "[]") as LocalAccount[];
+    const accounts = JSON.parse(localStorage.getItem(LOCAL_ACCOUNTS) ?? "[]") as LocalAccount[];
+    return accounts.map((account) => ({ ...account, avatarUrl: account.avatarUrl ?? null }));
   } catch {
     return [];
   }
@@ -86,7 +117,7 @@ const localAuth: AuthService = {
     const accounts = readAccounts();
     let account = accounts.find((item) => item.phone === phone);
     if (!account) {
-      account = { id: crypto.randomUUID(), name: name?.trim() || "New customer", phone, email: "", role: role ?? "driver", password: "" };
+      account = { id: crypto.randomUUID(), name: name?.trim() || "New customer", phone, email: "", role: role ?? "driver", avatarUrl: null, password: "" };
       writeAccounts([...accounts, account]);
     }
     const token = `local-${crypto.randomUUID()}`;
@@ -104,6 +135,10 @@ const localAuth: AuthService = {
     const { password: _password, ...user } = account;
     return { token, user };
   },
+  googleConfig: async () => ({ enabled: false, clientId: null }),
+  signInWithGoogle: async () => {
+    throw new ApiError("Google sign-in needs the MechNow API. Use your phone number instead.", 400);
+  },
   logout: async () => {
     localStorage.removeItem(LOCAL_SESSION);
     clearToken();
@@ -116,6 +151,27 @@ const localAuth: AuthService = {
     if (!account) throw new ApiError("Sign in to continue.", 401);
     const { password: _password, ...user } = account;
     return { user, provider: null };
+  },
+  updateProfile: async (input) => {
+    const raw = localStorage.getItem(LOCAL_SESSION);
+    if (!raw) throw new ApiError("Sign in to continue.", 401);
+    const { userId } = JSON.parse(raw) as { userId: string };
+    const accounts = readAccounts();
+    const index = accounts.findIndex((item) => item.id === userId);
+    if (index < 0) throw new ApiError("Sign in to continue.", 401);
+    const account = accounts[index];
+    const name = input.name === undefined ? account.name : input.name.trim();
+    if (!name) throw new ApiError("Name is required.", 400);
+    const updated: LocalAccount = {
+      ...account,
+      name,
+      email: input.email === undefined ? account.email : input.email?.trim() || "",
+      avatarUrl: input.avatarUrl === undefined ? account.avatarUrl : input.avatarUrl,
+    };
+    accounts[index] = updated;
+    writeAccounts(accounts);
+    const { password: _password, ...user } = updated;
+    return user;
   },
 };
 

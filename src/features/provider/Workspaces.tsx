@@ -1,5 +1,5 @@
 import "./provider.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -282,6 +282,102 @@ function MechanicOverview({ openJobs, jobs, incoming, onChanged }: { openJobs: (
 const jobStates = ["Requested", "Accepted", "En route", "Arrived", "Diagnosing", "Awaiting approval", "Repairing", "Awaiting parts", "Completed"];
 const jobStateOrder: RequestStatus[] = ["requested", "accepted", "enRoute", "arrived", "diagnosing", "awaitingApproval", "repairing", "awaitingParts", "completed"];
 
+/** Approximate metres between two coordinates, used to throttle publishes. */
+function metresBetween(left: { lat: number; lng: number }, right: { lat: number; lng: number }) {
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRadians(right.lat - left.lat);
+  const dLng = toRadians(right.lng - left.lng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRadians(left.lat)) * Math.cos(toRadians(right.lat)) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Publishes the provider's device position to the active job so the customer's
+ * tracking page can follow the approach. Publishing is throttled to one update
+ * per 8 seconds or 30 metres, whichever happens first.
+ */
+function ShareLocation({ request }: { request: ServiceRequest }) {
+  const [sharing, setSharing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const watchId = useRef<number | null>(null);
+  const lastSent = useRef<{ lat: number; lng: number; at: number } | null>(null);
+  const sending = useRef(false);
+
+  const stop = useCallback(() => {
+    if (watchId.current != null && typeof navigator !== "undefined" && "geolocation" in navigator) {
+      navigator.geolocation.clearWatch(watchId.current);
+    }
+    watchId.current = null;
+    sending.current = false;
+    setSharing(false);
+  }, []);
+
+  useEffect(() => stop, [stop, request.id]);
+
+  const start = () => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      setError("Location is not available on this device.");
+      return;
+    }
+    setError(null);
+    setMessage("Waiting for a GPS fix…");
+    setSharing(true);
+    watchId.current = navigator.geolocation.watchPosition(
+      (position) => {
+        if (sending.current) return;
+        const next = { lat: position.coords.latitude, lng: position.coords.longitude };
+        const previous = lastSent.current;
+        if (previous) {
+          const withinTime = Date.now() - previous.at < 8000;
+          const withinDistance = metresBetween(previous, next) < 30;
+          if (withinTime && withinDistance) return;
+        }
+        sending.current = true;
+        void requestService
+          .publishLocation(request.id, next)
+          .then(() => {
+            lastSent.current = { ...next, at: Date.now() };
+            setError(null);
+            setMessage(`Sharing live · updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date())}`);
+          })
+          .catch((cause: unknown) => {
+            setError(cause instanceof Error ? cause.message : "Could not share your location.");
+            stop();
+          })
+          .finally(() => {
+            sending.current = false;
+          });
+      },
+      (geoError) => {
+        setError(
+          geoError.code === geoError.PERMISSION_DENIED
+            ? "Location access is off. Enable it to share your live position."
+            : "We couldn't get a GPS fix. Try again in a moment.",
+        );
+        stop();
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+  };
+
+  return (
+    <div className={`d-share-location${sharing ? " is-sharing" : ""}`}>
+      <span className="d-share-location__icon"><Navigation size={18} /></span>
+      <div>
+        <span>LIVE LOCATION</span>
+        <strong>{sharing ? "Customer can see you moving" : "Share your live position"}</strong>
+        <small>{error ?? message ?? "The customer's tracking page updates as you drive to them."}</small>
+      </div>
+      <DButton icon={sharing ? X : Navigation} onClick={sharing ? stop : start} variant={sharing ? "secondary" : "success"}>
+        {sharing ? "Stop sharing" : "Share location"}
+      </DButton>
+    </div>
+  );
+}
+
 function JobStateMachine({ request, onChanged }: { request: ServiceRequest | null; onChanged: () => void }) {
   const actions = useAsync<RequestStatus[]>(() => (request ? requestService.actions(request.id) : Promise.resolve([])), [], [request?.id]);
   const [busy, setBusy] = useState(false);
@@ -326,6 +422,7 @@ function JobStateMachine({ request, onChanged }: { request: ServiceRequest | nul
         {!actions.loading && actions.data.length === 0 && <span className="d-complete-chip"><CheckCircle2 size={16} /> No further actions</span>}
         {!actions.loading && actions.data.map((to) => <DButton disabled={busy} key={to} onClick={() => void advance(to)}>{`Move to ${statusLabels[to]}`}</DButton>)}
       </div>
+      {request.status !== "completed" && request.status !== "cancelled" && <ShareLocation request={request} />}
       {error && <p role="alert">{error}</p>}
       <p className="d-state-note"><ShieldCheck size={14} /> States cannot be skipped. Cancelled is available only before repair; Disputed is available after completion.</p>
     </section>

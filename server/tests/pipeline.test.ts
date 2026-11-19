@@ -61,6 +61,20 @@ test("end-to-end P0 job pipeline", async () => {
   const requestId = created.request!.id;
   requests.acceptRequest(mechAuth, requestId);
   requests.transition(mechAuth, requestId, "enRoute");
+
+  // 5a. The assigned provider can publish a live position that the customer reads.
+  const shared = requests.publishProviderLocation(mechAuth, requestId, { lat: 5.61, lng: -0.2 });
+  assert.equal(shared?.providerLocation?.lat, 5.61, "provider latitude is stored on the request");
+  assert.equal(shared?.providerLocation?.lng, -0.2, "provider longitude is stored on the request");
+  assert.ok(shared?.providerLocation?.updatedAt, "provider location records when it was published");
+  const asCustomer = requests.getRequest(driverAuth, requestId);
+  assert.equal(asCustomer?.providerLocation?.lat, 5.61, "the customer sees the assigned provider's position");
+  assert.throws(
+    () => requests.publishProviderLocation(driverAuth, requestId, { lat: 5.6, lng: -0.19 }),
+    /assigned provider/i,
+    "a customer cannot publish a provider location",
+  );
+
   requests.transition(mechAuth, requestId, "arrived");
   requests.transition(mechAuth, requestId, "diagnosing");
   const atApproval = requests.transition(mechAuth, requestId, "awaitingApproval");
