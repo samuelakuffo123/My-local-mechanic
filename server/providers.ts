@@ -19,6 +19,14 @@ export interface ProviderProfile {
   available: boolean;
   rating: number;
   reliability: number;
+  lat: number | null;
+  lng: number | null;
+  address: string | null;
+}
+
+/** A verified provider that can be placed on the discovery map. */
+export interface NearbyProvider extends ProviderProfile {
+  distanceKm: number | null;
 }
 
 function hydrate(row: Record<string, unknown>): ProviderProfile {
@@ -34,33 +42,74 @@ function hydrate(row: Record<string, unknown>): ProviderProfile {
     available: Boolean(row.available),
     rating: Number(row.rating ?? 0),
     reliability: Number(row.reliability ?? 0),
+    lat: row.lat == null ? null : Number(row.lat),
+    lng: row.lng == null ? null : Number(row.lng),
+    address: (row.address as string) ?? null,
   };
 }
 
 const SELECT = `SELECT id, user_id as userId, type, business_name as businessName, region,
-  service_areas as serviceAreas, specialisations, status, available, rating, reliability FROM providers`;
+  service_areas as serviceAreas, specialisations, status, available, rating, reliability,
+  lat, lng, address FROM providers`;
 
-export function applyAsProvider(auth: AuthContext, input: { businessName: string; type: ProviderType; region?: string; serviceAreas?: string[] }) {
+export function applyAsProvider(auth: AuthContext, input: {
+  businessName: string;
+  type: ProviderType;
+  region?: string;
+  serviceAreas?: string[];
+  lat?: number;
+  lng?: number;
+  address?: string;
+}) {
   if (auth.role === "driver" || auth.role === "admin") {
     throw forbidden("Switch your account to a provider role before applying.");
   }
   if (!input.businessName?.trim()) throw badRequest("Business name is required.");
   if (!["mechanic", "tow", "vendor"].includes(input.type)) throw badRequest("Choose a valid provider type.");
+  if (input.lat != null && (!Number.isFinite(input.lat) || input.lat < -90 || input.lat > 90)) {
+    throw badRequest("Latitude must be a number between -90 and 90.");
+  }
+  if (input.lng != null && (!Number.isFinite(input.lng) || input.lng < -180 || input.lng > 180)) {
+    throw badRequest("Longitude must be a number between -180 and 180.");
+  }
   const existing = get<Record<string, unknown>>(`${SELECT} WHERE user_id = ?`, [auth.userId]);
   if (existing) {
     // Idempotent: update the application instead of duplicating it.
+    const current = hydrate(existing);
     run(
-      `UPDATE providers SET business_name = ?, type = ?, region = ?, service_areas = ?, updated_at = ? WHERE user_id = ?`,
-      [input.businessName.trim(), input.type, input.region ?? null, JSON.stringify(input.serviceAreas ?? []), nowIso(), auth.userId],
+      `UPDATE providers SET business_name = ?, type = ?, region = ?, service_areas = ?, lat = ?, lng = ?, address = ?, updated_at = ? WHERE user_id = ?`,
+      [
+        input.businessName.trim(),
+        input.type,
+        input.region ?? null,
+        JSON.stringify(input.serviceAreas ?? []),
+        input.lat ?? current.lat,
+        input.lng ?? current.lng,
+        input.address ?? current.address,
+        nowIso(),
+        auth.userId,
+      ],
     );
     return hydrate(get<Record<string, unknown>>(`${SELECT} WHERE user_id = ?`, [auth.userId])!);
   }
   const id = newId();
   const timestamp = nowIso();
   run(
-    `INSERT INTO providers (id, user_id, type, business_name, region, service_areas, specialisations, status, available, rating, reliability, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, '[]', 'pending', 0, 0, 0, ?, ?)`,
-    [id, auth.userId, input.type, input.businessName.trim(), input.region ?? null, JSON.stringify(input.serviceAreas ?? []), timestamp, timestamp],
+    `INSERT INTO providers (id, user_id, type, business_name, region, service_areas, specialisations, status, available, rating, reliability, lat, lng, address, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, '[]', 'pending', 0, 0, 0, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      auth.userId,
+      input.type,
+      input.businessName.trim(),
+      input.region ?? null,
+      JSON.stringify(input.serviceAreas ?? []),
+      input.lat ?? null,
+      input.lng ?? null,
+      input.address ?? null,
+      timestamp,
+      timestamp,
+    ],
   );
   auditFrom(auth, "provider.apply", "provider", id);
   return hydrate(get<Record<string, unknown>>(`${SELECT} WHERE id = ?`, [id])!);
@@ -96,6 +145,60 @@ export function eligibleProviders(kind: "emergency" | "booking" | "tow", region?
     if (inRegion.length > 0) rows = inRegion;
   }
   return rows;
+}
+
+function distanceKm(from: { lat: number; lng: number }, to: { lat: number; lng: number }) {
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const earthRadius = 6371;
+  const dLat = toRadians(to.lat - from.lat);
+  const dLng = toRadians(to.lng - from.lng);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(from.lat)) * Math.cos(toRadians(to.lat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Verified providers that customers can discover on the map: mechanics, tow
+ * operators and parts shops. Only records with coordinates are returned so a
+ * marker always corresponds to a real location. Availability affects ordering
+ * but not inclusion, because a shop or garage can still be visited while busy.
+ */
+export function nearbyProviders(input: {
+  lat?: number | null;
+  lng?: number | null;
+  radiusKm?: number;
+  type?: ProviderType | null;
+}): NearbyProvider[] {
+  const rows = all<Record<string, unknown>>(
+    `${SELECT} WHERE status = 'verified'${input.type ? " AND type = ?" : ""}`,
+    input.type ? [input.type] : [],
+  ).map(hydrate);
+
+  const origin = typeof input.lat === "number" && typeof input.lng === "number" && Number.isFinite(input.lat) && Number.isFinite(input.lng)
+    ? { lat: input.lat, lng: input.lng }
+    : null;
+  const radius = input.radiusKm ?? 40;
+
+  const withDistance = rows
+    .filter((provider): provider is ProviderProfile & { lat: number; lng: number } => provider.lat != null && provider.lng != null)
+    .map((provider) => ({
+      ...provider,
+      distanceKm: origin ? Number(distanceKm(origin, provider).toFixed(1)) : null,
+    }));
+
+  const withinRadius = origin ? withDistance.filter((provider) => (provider.distanceKm ?? 0) <= radius) : withDistance;
+  const pool = withinRadius.length > 0 ? withinRadius : withDistance;
+
+  return pool
+    .sort((left, right) => {
+      if (left.distanceKm != null && right.distanceKm != null && left.distanceKm !== right.distanceKm) {
+        return left.distanceKm - right.distanceKm;
+      }
+      if (left.available !== right.available) return left.available ? -1 : 1;
+      return right.rating - left.rating;
+    })
+    .slice(0, 40);
 }
 
 export function providerCredentials(providerId: string) {

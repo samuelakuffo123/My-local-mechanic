@@ -122,6 +122,31 @@ test("HTTP boundary: routing, auth, ownership and response shapes", async () => 
     const token = verified.json.token as string;
     assert.equal(verified.json.user.role, "driver");
 
+    // --- Profile photos are scoped to the signed-in user and persist ---------
+    const avatarUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2Q==";
+    const profilePatch = await call("/api/me", {
+      method: "PATCH",
+      token,
+      body: { name: "Ama Mensah", email: "ama@example.com", avatarUrl },
+    });
+    assert.equal(profilePatch.status, 200);
+    assert.equal(profilePatch.json.avatarUrl, avatarUrl);
+
+    const profileReload = await call("/api/me", { token });
+    assert.equal((profileReload.json.user as { name?: string; avatarUrl?: string }).name, "Ama Mensah");
+    assert.equal((profileReload.json.user as { avatarUrl?: string }).avatarUrl, avatarUrl, "the photo survives a reload");
+
+    const invalidAvatar = await call("/api/me", {
+      method: "PATCH",
+      token,
+      body: { avatarUrl: "javascript:alert(1)" },
+    });
+    assert.equal(invalidAvatar.status, 400, "non-image avatar input is rejected");
+
+    const removedAvatar = await call("/api/me", { method: "PATCH", token, body: { avatarUrl: null } });
+    assert.equal(removedAvatar.status, 200);
+    assert.equal(removedAvatar.json.avatarUrl, null);
+
     // A wrong code increments attempts and never issues a session.
     const wrong = await call("/api/auth/verify", { body: { phone: "0244000001", code: "000000" } });
     assert.equal(wrong.status, 400);
@@ -198,6 +223,45 @@ test("HTTP boundary: routing, auth, ownership and response shapes", async () => 
     assert.equal((asOwner.json.credentials as unknown[]).length, 1, "owner sees their own documents");
     const asCustomer = await call(`/api/providers/${providerId}`, { token: otherToken });
     assert.deepEqual(asCustomer.json.credentials, [], "other users never see identity documents");
+
+    // --- Nearby discovery returns verified providers with coordinates --------
+    const located = await call("/api/providers/apply", {
+      token: mechToken,
+      body: {
+        businessName: "Kofi Auto",
+        type: "mechanic",
+        region: "Greater Accra",
+        lat: 5.6037,
+        lng: -0.187,
+        address: "Oxford Street, Osu",
+      },
+    });
+    assert.equal(located.status, 200);
+    assert.equal(located.json.lat, 5.6037, "provider coordinates persist from the application");
+
+    const unverifiedNearby = await call("/api/providers/nearby?lat=5.6037&lng=-0.187", { token: otherToken });
+    assert.equal(unverifiedNearby.status, 200);
+    assert.equal((unverifiedNearby.json.items as unknown[]).length, 0, "pending providers are not discoverable");
+
+    await call(`/api/admin/providers/${providerId}/verify`, { token: adminToken, body: { decision: "verify" } });
+    const nearby = await call("/api/providers/nearby?lat=5.6037&lng=-0.187", { token: otherToken });
+    const nearbyItems = nearby.json.items as Array<{ id: string; distanceKm: number | null }>;
+    const found = nearbyItems.find((item) => item.id === providerId);
+    assert.ok(found, "verified providers with coordinates appear in nearby discovery");
+    assert.equal(found?.distanceKm, 0, "distance is measured from the supplied origin");
+
+    const filteredOut = await call("/api/providers/nearby?lat=5.6037&lng=-0.187&type=vendor", { token: otherToken });
+    assert.equal((filteredOut.json.items as Array<{ id: string }>).some((item) => item.id === providerId), false, "type filters exclude other categories");
+
+    for (const [label, query] of [
+      ["latitude", "lat=500&lng=-0.187"],
+      ["longitude", "lat=5.6037&lng=999"],
+      ["type", "type=spaceship"],
+      ["radius", "radiusKm=0"],
+    ] as const) {
+      const rejected = await call(`/api/providers/nearby?${query}`, { token: otherToken });
+      assert.equal(rejected.status, 400, `nearby discovery rejects an invalid ${label}`);
+    }
 
     // --- Admin endpoints agree with the client on `{ items }` ---------------
     for (const path of [

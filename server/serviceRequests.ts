@@ -27,6 +27,7 @@ function actorRoleFor(auth: AuthContext): ActorRole {
 const SELECT = `SELECT r.id, r.ref, r.customer_id as customerId, r.vehicle_id as vehicleId, r.provider_id as providerId,
   r.kind, r.problem, r.location_label as locationLabel, r.lat, r.lng, r.region, r.status, r.version,
   r.decline_count as declineCount, r.cancellation_reason as cancellationReason,
+  r.provider_lat as providerLat, r.provider_lng as providerLng, r.provider_location_at as providerLocationAt,
   r.created_at as createdAt, r.updated_at as updatedAt, r.accepted_at as acceptedAt,
   r.completed_at as completedAt, r.cancelled_at as cancelledAt FROM service_requests r`;
 
@@ -41,6 +42,14 @@ function hydrate(row: Record<string, unknown> | undefined) {
     kind: row.kind as RequestKind,
     problem: String(row.problem),
     location: { label: (row.locationLabel as string) ?? null, lat: row.lat as number | null, lng: row.lng as number | null },
+    providerLocation:
+      row.providerLat != null && row.providerLng != null
+        ? {
+            lat: Number(row.providerLat),
+            lng: Number(row.providerLng),
+            updatedAt: (row.providerLocationAt as string) ?? String(row.updatedAt),
+          }
+        : null,
     region: (row.region as string) ?? null,
     status: row.status as RequestStatus,
     version: Number(row.version),
@@ -329,5 +338,38 @@ export function updateRequestLocation(
     nowIso(),
     id,
   ]);
+  return getRequestRaw(id);
+}
+
+/**
+ * Lets the assigned provider publish a live position while they are travelling
+ * to the customer. Access is deliberately narrow: only the provider that owns
+ * the accepted job (or an admin) may write it, and only while the job is live.
+ */
+export function publishProviderLocation(
+  auth: AuthContext,
+  id: string,
+  location: { lat: number; lng: number },
+) {
+  const request = getRequestRaw(id);
+  if (!request) throw notFound("Request not found.");
+  if (auth.role === "driver") throw forbidden("Only the assigned provider can share a live location.");
+  if (auth.role !== "admin") {
+    const provider = getProviderForUser(auth.userId);
+    if (!provider) throw forbidden("Create a provider profile first.");
+    if (!request.providerId || request.providerId !== provider.id) {
+      throw forbidden("You can only share a location for a job assigned to you.");
+    }
+  }
+  if (request.status === "completed" || request.status === "cancelled") {
+    throw conflict("This request is no longer active.");
+  }
+  if (!Number.isFinite(location.lat) || !Number.isFinite(location.lng)) {
+    throw badRequest("A valid latitude and longitude are required.");
+  }
+  run(
+    `UPDATE service_requests SET provider_lat = ?, provider_lng = ?, provider_location_at = ?, version = version + 1, updated_at = ? WHERE id = ?`,
+    [location.lat, location.lng, nowIso(), nowIso(), id],
+  );
   return getRequestRaw(id);
 }

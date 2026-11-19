@@ -28,9 +28,11 @@ interface UserRow {
   name: string;
   phone: string;
   email: string | null;
+  avatarDataUrl: string | null;
   status: string;
 }
 
+const USER_COLUMNS = "id, role, name, phone, email, avatar_data_url as avatarDataUrl, status";
 const SELF_SERVE_ROLES: Role[] = ["driver", "mechanic", "tow", "vendor"];
 
 // Used when a phone number has no credentials so unknown numbers take a similar
@@ -86,7 +88,7 @@ export function verifyOtp(rawPhone: string, code: string, options: { name?: stri
   const role: Role = options.role && SELF_SERVE_ROLES.includes(options.role) ? options.role : "driver";
   const issued = tx(() => {
     run("UPDATE otp_codes SET consumed_at = ? WHERE id = ?", [nowIso(), record.id]);
-    let user = get<UserRow>("SELECT id, role, name, phone, email, status FROM users WHERE phone = ?", [phone]);
+    let user = get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE phone = ?`, [phone]);
     if (!user) {
       const id = newId();
       const timestamp = nowIso();
@@ -94,7 +96,7 @@ export function verifyOtp(rawPhone: string, code: string, options: { name?: stri
         `INSERT INTO users (id, role, name, phone, email, status, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 'active', ?, ?)`,
         [id, role, options.name?.trim() || "New customer", phone, timestamp, timestamp],
       );
-      user = get<UserRow>("SELECT id, role, name, phone, email, status FROM users WHERE id = ?", [id]);
+      user = get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [id]);
     }
     if (!user) throw new Error("Failed to provision user.");
     if (user.status !== "active") throw forbidden("This account is not active.");
@@ -109,6 +111,147 @@ export function verifyOtp(rawPhone: string, code: string, options: { name?: stri
 
   auditFrom({ userId: issued.user.id, role: issued.user.role, name: issued.user.name }, "auth.login", "user", issued.user.id);
   return sessionPayload(issued.token, issued.user);
+}
+
+interface GoogleTokenInfo {
+  azp?: unknown;
+  aud?: unknown;
+  sub?: unknown;
+  exp?: unknown;
+  scope?: unknown;
+  email?: unknown;
+  email_verified?: unknown;
+  name?: unknown;
+}
+
+interface GoogleIdentity {
+  subject: string;
+  email: string;
+  name: string;
+}
+
+function isVerifiedEmail(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
+function displayNameFrom(value: unknown, email: string): string {
+  if (typeof value === "string" && value.trim()) return value.trim().slice(0, 80);
+  const localPart = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return localPart ? localPart.slice(0, 80) : "MechNow customer";
+}
+
+async function verifyGoogleAccessToken(accessToken: string): Promise<GoogleIdentity> {
+  if (!config.googleClientId) throw badRequest("Google sign-in isn't configured for this server.");
+
+  let endpoint: URL;
+  try {
+    endpoint = new URL(config.googleTokenInfoUrl);
+  } catch {
+    throw new Error("GOOGLE_TOKENINFO_URL must be a valid URL.");
+  }
+  endpoint.searchParams.set("access_token", accessToken);
+
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch {
+    throw unauthorized("We couldn't reach Google to verify sign-in. Try again.");
+  }
+  if (!response.ok) throw unauthorized("Google sign-in could not be verified. Try again.");
+
+  let info: GoogleTokenInfo;
+  try {
+    info = (await response.json()) as GoogleTokenInfo;
+  } catch {
+    throw unauthorized("Google sign-in could not be verified. Try again.");
+  }
+
+  const subject = typeof info.sub === "string" ? info.sub.trim() : "";
+  const email = typeof info.email === "string" ? info.email.trim().toLowerCase() : "";
+  const expiry = Number(info.exp);
+  const requester = typeof info.azp === "string" && info.azp
+    ? info.azp
+    : typeof info.aud === "string" ? info.aud : "";
+  const scopes = typeof info.scope === "string" ? info.scope.split(/\s+/).filter(Boolean) : [];
+  const hasEmailScope = scopes.includes("openid") || scopes.includes("https://www.googleapis.com/auth/userinfo.email");
+
+  if (
+    !subject ||
+    !email ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    requester !== config.googleClientId ||
+    !Number.isFinite(expiry) ||
+    expiry <= Math.floor(Date.now() / 1000) ||
+    !isVerifiedEmail(info.email_verified) ||
+    !hasEmailScope
+  ) {
+    throw unauthorized("That Google sign-in could not be verified.");
+  }
+
+  return { subject, email, name: displayNameFrom(info.name, email) };
+}
+
+/** Verifies a Google access token, links the account, then issues a MechNow session. */
+export async function signInWithGoogle(accessToken: string, options: { role?: Role } = {}) {
+  const identity = await verifyGoogleAccessToken(accessToken);
+  const role: Role = options.role && SELF_SERVE_ROLES.includes(options.role) ? options.role : "driver";
+
+  const user = tx(() => {
+    const columns = USER_COLUMNS;
+    const link = get<{ user_id: string }>(
+      "SELECT user_id FROM oauth_accounts WHERE provider = 'google' AND provider_subject = ?",
+      [identity.subject],
+    );
+
+    let existing = link ? get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [link.user_id]) : undefined;
+    if (!existing) {
+      existing = get<UserRow>(`SELECT ${columns} FROM users WHERE lower(email) = ? AND status != 'deleted'`, [identity.email]);
+    }
+
+    if (existing) {
+      if (existing.status !== "active") throw forbidden("This account is not active.");
+      if (!existing.email) {
+        run("UPDATE users SET email = ?, updated_at = ? WHERE id = ?", [identity.email, nowIso(), existing.id]);
+        existing = get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [existing.id]);
+      }
+    } else {
+      const id = newId();
+      const timestamp = nowIso();
+      // `users.phone` is NOT NULL UNIQUE. Google-only accounts get a stable,
+      // non-dialable sentinel derived from the immutable Google subject.
+      const phone = `google:${sha256(`mechnow-google:${identity.subject}`).slice(0, 24)}`;
+      run(
+        `INSERT INTO users (id, role, name, phone, email, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+        [id, role, identity.name, phone, identity.email, timestamp, timestamp],
+      );
+      existing = get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [id]);
+    }
+
+    if (!existing) throw new Error("Failed to provision Google user.");
+    const timestamp = nowIso();
+    run(
+      `INSERT INTO oauth_accounts (provider, provider_subject, user_id, email, created_at, updated_at)
+       VALUES ('google', ?, ?, ?, ?, ?)
+       ON CONFLICT(provider, provider_subject) DO UPDATE SET
+         user_id = excluded.user_id, email = excluded.email, updated_at = excluded.updated_at`,
+      [identity.subject, existing.id, identity.email, timestamp, timestamp],
+    );
+    return existing;
+  });
+
+  const session = createSession(user.id);
+  auditFrom(
+    { userId: user.id, role: user.role, name: user.name },
+    "auth.login.google",
+    "user",
+    user.id,
+    { provider: "google" },
+  );
+  return session;
 }
 
 export function authenticateToken(token: string): AuthContext | null {
@@ -135,8 +278,17 @@ export function requireRole(auth: AuthContext | null, roles: Role[]): AuthContex
 }
 
 export function getUser(userId: string) {
-  return get<{ id: string; role: Role; name: string; phone: string; email: string | null; status: string; createdAt: string }>(
-    `SELECT id, role, name, phone, email, status, created_at as createdAt FROM users WHERE id = ?`,
+  return get<{
+    id: string;
+    role: Role;
+    name: string;
+    phone: string;
+    email: string | null;
+    avatarUrl: string | null;
+    status: string;
+    createdAt: string;
+  }>(
+    `SELECT id, role, name, phone, email, avatar_data_url as avatarUrl, status, created_at as createdAt FROM users WHERE id = ?`,
     [userId],
   );
 }
@@ -178,7 +330,7 @@ export function checkPasswordById(userId: string, password: string) {
 }
 
 export function createSession(userId: string) {
-  const user = get<UserRow>("SELECT id, role, name, phone, email, status FROM users WHERE id = ?", [userId]);
+  const user = get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [userId]);
   if (!user) throw unauthorized();
   if (user.status !== "active") throw forbidden("This account is not active.");
   const token = randomToken(32);
@@ -191,15 +343,24 @@ export function createSession(userId: string) {
 }
 
 export function listUsers(role?: Role) {
+  // Keep bulk admin responses lean: avatars are only returned for the user's own session.
+  const columns = "id, role, name, phone, email, status";
   const rows = role
-    ? all<UserRow>("SELECT id, role, name, phone, email, status FROM users WHERE role = ? ORDER BY created_at DESC", [role])
-    : all<UserRow>("SELECT id, role, name, phone, email, status FROM users ORDER BY created_at DESC");
+    ? all<Omit<UserRow, "avatarDataUrl">>(`SELECT ${columns} FROM users WHERE role = ? ORDER BY created_at DESC`, [role])
+    : all<Omit<UserRow, "avatarDataUrl">>(`SELECT ${columns} FROM users ORDER BY created_at DESC`);
   return rows;
 }
 
 function sessionPayload(token: string, user: UserRow) {
   return {
     token,
-    user: { id: user.id, role: user.role, name: user.name, phone: user.phone, email: user.email },
+    user: {
+      id: user.id,
+      role: user.role,
+      name: user.name,
+      phone: user.phone,
+      email: user.email,
+      avatarUrl: user.avatarDataUrl,
+    },
   };
 }
