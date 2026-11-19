@@ -18,6 +18,7 @@ const PartsRoute = lazy(() => import("../features/parts/PartsRoute").then((modul
 const ProfileRoute = lazy(() => import("../features/profile/ProfileRoute").then((module) => ({ default: module.ProfileRoute })));
 const ProviderRoute = lazy(() => import("../features/provider/ProviderRoute").then((module) => ({ default: module.ProviderRoute })));
 const TowRoute = lazy(() => import("../features/tow/TowRoute").then((module) => ({ default: module.TowRoute })));
+const TrackingRoute = lazy(() => import("../features/tracking/TrackingRoute").then((module) => ({ default: module.TrackingRoute })));
 const VehiclesRoute = lazy(() => import("../features/vehicles/VehiclesRoute").then((module) => ({ default: module.VehiclesRoute })));
 
 const pending = <div className="route-loading" role="status">Loading My Local Mechanic…</div>;
@@ -51,6 +52,7 @@ export const router = createBrowserRouter([
   { path: "/app/explore", element: driver(<FeatureRoute start="explore" />) },
   { path: "/app/services", element: driver(<FeatureRoute start="hub" />) },
   { path: "/app/activity", element: driver(<ActivityRoute />) },
+  { path: "/app/track/:id", element: driver(<TrackingRoute />) },
   { path: "/app/profile", element: driver(<ProfileRoute />) },
   { path: "/app/emergency/*", element: driver(<EmergencyRoute />) },
   { path: "/app/tow/*", element: driver(<TowRoute />) },

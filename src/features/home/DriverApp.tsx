@@ -19,11 +19,9 @@ import {
   Download,
   FileText,
   Fuel,
-  Gauge,
   Headphones,
   HelpCircle,
   HeartPulse,
-  History,
   Home,
   KeyRound,
   LifeBuoy,
@@ -60,15 +58,16 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { DriverFeatureStart } from "../explore/DriverFeatures";
 import corollaPhoto from "../../assets/corolla.jpg";
-import mechanicPhoto from "../../assets/mechanic.jpg";
 import { useAppStore } from "../../state/store";
 import { emergencyService } from "../../services/emergency";
-import { providerService } from "../../services/providers";
+import { prepareProfileImage } from "../../services/profileImage";
 import { requestService } from "../../services/requests";
-import type { ProviderProfile, RequestStatus, ServiceRequest } from "../../services/apiTypes";
+import type { NearbyProvider, RequestStatus, ServiceRequest } from "../../services/apiTypes";
 import type { EmergencyStatus } from "../../state/emergencyMachine";
+import type { User } from "../../state/types";
 import { LiveMap } from "../../components/LiveMap";
 import { useGeolocation, type GeoPoint } from "../../hooks/useGeolocation";
+import { useNearbyProviders } from "../../hooks/useNearbyProviders";
 import { getDrivingRoute } from "../../services/directions";
 
 // The emergency walkthrough is a scripted UI state machine. As it progresses we
@@ -94,6 +93,29 @@ function initials(name?: string | null) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("") || "MN";
+}
+
+/** A provider position is considered live for two minutes after publishing. */
+function isFreshLocation(location: { updatedAt: string } | null | undefined, maxAgeMs = 120_000) {
+  if (!location) return false;
+  const updated = Date.parse(location.updatedAt);
+  return Number.isFinite(updated) && Date.now() - updated <= maxAgeMs;
+}
+
+function UserAvatar({
+  name,
+  avatarUrl,
+  className = "",
+}: {
+  name?: string | null;
+  avatarUrl?: string | null;
+  className?: string;
+}) {
+  return (
+    <div className={`avatar ${className}`.trim()} aria-hidden="true">
+      {avatarUrl ? <img alt="" src={avatarUrl} /> : initials(name)}
+    </div>
+  );
 }
 
 type Screen =
@@ -272,12 +294,13 @@ function BottomNav({
   onNavigate,
   onProfile,
 }: {
-  active?: "Home" | "Profile";
+  active?: "Home" | "Explore" | "Activity" | "Profile";
   onEmergency: () => void;
   onHome: () => void;
   onNavigate: (start: DriverFeatureStart) => void;
   onProfile: () => void;
 }) {
+  const navigate = useNavigate();
   const items = [
     { label: "Home", icon: Home },
     { label: "Explore", icon: Compass },
@@ -291,7 +314,17 @@ function BottomNav({
         <button
           className={`${active === label ? "active" : ""} ${emergency ? "nav-emergency" : ""}`}
           key={label}
-          onClick={() => label === "Home" ? onHome() : label === "Explore" ? onNavigate("explore") : label === "Emergency" ? onEmergency() : label === "Profile" ? onProfile() : undefined}
+          onClick={() =>
+            label === "Home"
+              ? onHome()
+              : label === "Explore"
+                ? onNavigate("explore")
+                : label === "Emergency"
+                  ? onEmergency()
+                  : label === "Activity"
+                    ? navigate("/app/activity")
+                    : onProfile()
+          }
           type="button"
         >
           <Icon size={20} strokeWidth={1.75} />
@@ -333,28 +366,77 @@ function EmergencySlider({ onComplete }: { onComplete: () => void }) {
   );
 }
 
-function NearbyProviders({ onNavigate }: { onNavigate: (start: DriverFeatureStart) => void }) {
-  const [state, setState] = useState<{ items: ProviderProfile[]; loading: boolean }>({ items: [], loading: true });
-  useEffect(() => {
-    let active = true;
-    providerService
-      .list("emergency")
-      .then((items) => { if (active) setState({ items, loading: false }); })
-      .catch(() => { if (active) setState({ items: [], loading: false }); });
-    return () => { active = false; };
-  }, []);
+function providerKindMeta(type: NearbyProvider["type"]) {
+  if (type === "tow") return { label: "Tow", icon: Truck, tone: "tow" as const, start: "tow" as DriverFeatureStart };
+  if (type === "vendor") return { label: "Shop", icon: ShoppingBag, tone: "shop" as const, start: "parts" as DriverFeatureStart };
+  return { label: "Mechanic", icon: Wrench, tone: "mechanic" as const, start: "explore" as DriverFeatureStart };
+}
 
-  if (state.loading) return <p className="text-button">Finding trusted help near you…</p>;
-  if (state.items.length === 0) return <button className="text-button" onClick={() => onNavigate("explore")} type="button">No verified providers are online right now — open the map</button>;
+const liveStatusCopy: Record<string, string> = {
+  requested: "Finding a provider",
+  accepted: "Provider accepted",
+  enRoute: "Provider on the way",
+  arrived: "Provider arrived",
+  diagnosing: "Diagnosing your vehicle",
+  awaitingApproval: "Estimate ready to review",
+  repairing: "Repair in progress",
+  awaitingParts: "Waiting for parts",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+function NearbyProviders({
+  items,
+  loading,
+  onOpen,
+}: {
+  items: NearbyProvider[];
+  loading: boolean;
+  onOpen: (provider: NearbyProvider) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="provider-carousel provider-carousel--loading" aria-hidden="true">
+        {[0, 1, 2].map((index) => <span className="provider-skeleton" key={index} />)}
+      </div>
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <button className="nearby-empty" onClick={() => onOpen({ type: "mechanic" } as NearbyProvider)} type="button">
+        <MapPin size={18} />
+        <span><strong>No verified providers nearby yet</strong><small>Open the map to widen your search.</small></span>
+        <ArrowRight size={16} />
+      </button>
+    );
+  }
   return (
-    <>
-      {state.items.slice(0, 6).map((provider) => (
-        <button key={provider.id} onClick={() => onNavigate("explore")} type="button">
-          <img alt={`${provider.businessName} mechanic`} src={mechanicPhoto} />
-          <span><small><BadgeCheck size={12} fill="currentColor" /> VERIFIED</small><strong>{provider.businessName}</strong><em><Star size={12} fill="currentColor" /> {provider.rating.toFixed(1)}</em><i><span className="live-dot" /> Available · {provider.region ?? "Ghana"}</i></span>
-        </button>
-      ))}
-    </>
+    <div className="provider-carousel">
+      {items.map((provider, index) => {
+        const meta = providerKindMeta(provider.type);
+        const Icon = meta.icon;
+        return (
+          <button
+            className={`provider-chip provider-chip--${meta.tone}`}
+            key={provider.id}
+            onClick={() => onOpen(provider)}
+            style={{ "--chip-index": index } as React.CSSProperties}
+            type="button"
+          >
+            <span className="provider-chip__icon"><Icon size={20} /></span>
+            <span className="provider-chip__body">
+              <small><BadgeCheck size={12} fill="currentColor" /> {meta.label}{provider.available ? " · online" : ""}</small>
+              <strong>{provider.businessName.replace(/\s*\(demo\)$/i, "")}</strong>
+              <em>
+                <span><Star size={11} fill="currentColor" /> {provider.rating > 0 ? provider.rating.toFixed(1) : "New"}</span>
+                <span>{provider.distanceKm != null ? `${provider.distanceKm} km` : provider.region ?? "Accra"}</span>
+              </em>
+            </span>
+            <ArrowRight className="provider-chip__arrow" size={16} />
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -367,26 +449,83 @@ function HomeScreen({
   onNavigate: (start: DriverFeatureStart) => void;
   onProfile: () => void;
 }) {
+  const navigate = useNavigate();
   const user = useAppStore((state) => state.user);
   const vehicle = useAppStore((state) => state.activeVehicle);
   const firstName = user?.name.split(" ")[0] ?? "there";
+  const geo = useGeolocation({ immediate: true });
+  const nearby = useNearbyProviders(geo.point ? { lat: geo.point.lat, lng: geo.point.lng } : null);
+  const [activeRequest, setActiveRequest] = useState<ServiceRequest | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      void requestService
+        .list()
+        .then((items) => {
+          if (!active) return;
+          setActiveRequest(items.find((item) => item.status !== "completed" && item.status !== "cancelled") ?? null);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const timer = window.setInterval(load, 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const onlineCount = nearby.items.filter((provider) => provider.available).length;
+  const greeting = new Date().getHours() < 12 ? "GOOD MORNING" : new Date().getHours() < 18 ? "GOOD AFTERNOON" : "GOOD EVENING";
+  const openProvider = (provider: NearbyProvider) => {
+    navigate(provider.id ? `/app/explore?provider=${encodeURIComponent(provider.id)}` : "/app/explore");
+  };
+  const activeLabel = activeRequest ? liveStatusCopy[activeRequest.status] ?? "Live update" : "";
+
   return (
     <div className="screen screen--home">
       <AppHeader
         trailing={
           <div className="header-actions">
             <IconButton label="Notifications" icon={Bell} />
-            <div className="avatar">KA</div>
+            <button aria-label="Open profile" className="avatar-button" onClick={onProfile} type="button">
+              <UserAvatar avatarUrl={user?.avatarUrl} name={user?.name} />
+            </button>
           </div>
         }
       />
 
       <main className="home-content">
         <section className="welcome">
-          <p className="eyebrow">GOOD MORNING</p>
+          <p className="eyebrow">{greeting}</p>
           <h1>Ready for the road, {firstName}?</h1>
-          <p>{vehicle ? `Your ${vehicle.model} is in good shape.` : "Add a vehicle to get personalised maintenance guidance."}</p>
+          <p>
+            {nearby.loading
+              ? "Checking who is around you…"
+              : onlineCount > 0
+                ? `${onlineCount} verified ${onlineCount === 1 ? "provider" : "providers"} online near you.`
+                : vehicle
+                  ? `Your ${vehicle.model} is in good shape. Help is one tap away.`
+                  : "Add a vehicle to get personalised maintenance guidance."}
+          </p>
         </section>
+
+        {activeRequest && (
+          <section className="home-live-card" aria-label="Active request">
+            <span className="home-live-card__tag"><span className="live-dot" /> LIVE REQUEST · {activeRequest.ref}</span>
+            <div className="home-live-card__body">
+              <div>
+                <h2>{activeRequest.provider?.businessName ?? "Finding your provider"}</h2>
+                <p>{activeLabel} · {activeRequest.location.label ?? "Location shared"}</p>
+              </div>
+              <button onClick={() => navigate(`/app/track/${activeRequest.id}`)} type="button">
+                Track <Navigation size={15} />
+              </button>
+            </div>
+            <span className="home-live-card__rail" aria-hidden="true" />
+          </section>
+        )}
 
         <section className="vehicle-card">
           <div className="vehicle-card__top">
@@ -418,7 +557,7 @@ function HomeScreen({
             <span className="emergency-card__icon"><LifeBuoy size={23} strokeWidth={1.75} /></span>
             <span className="emergency-card__copy">
               <strong>Emergency help</strong>
-              <small><i className="live-dot" /> 12 providers within 5 km</small>
+              <small><i className="live-dot" /> {onlineCount > 0 ? `${onlineCount} providers within 45 km` : "Verified providers across Accra"}</small>
             </span>
             <button
               onClick={() => {
@@ -436,24 +575,30 @@ function HomeScreen({
           <div className="section-heading">
             <div>
               <span className="overline">NEARBY HELP</span>
-              <h2>Trusted help around Accra</h2>
+              <h2>Around you right now</h2>
             </div>
             <button className="text-button" onClick={() => onNavigate("explore")} type="button">Open map</button>
           </div>
-          <button className="nearby-card" onClick={() => onNavigate("explore")} type="button">
-            <div className="nearby-card__map">
-              <span className="map-grid" />
-              <span className="map-road map-road--one" /><span className="map-road map-road--two" />
-              <span className="map-pin map-pin--one"><Wrench size={13} /></span>
-              <span className="map-pin map-pin--two"><Car size={13} /></span>
-              <span className="map-pin map-pin--three"><Wrench size={13} /></span>
-              <span className="map-pin map-pin--user"><Navigation size={12} fill="currentColor" /></span>
-              <span className="nearest-chip"><Clock3 size={13} /> Nearest: 8 min</span>
-            </div>
-          </button>
-          <div className="provider-carousel">
-            <NearbyProviders onNavigate={onNavigate} />
+          <div className="nearby-map-card">
+            <LiveMap
+              user={geo.point ? { lat: geo.point.lat, lng: geo.point.lng, label: geo.point.label ?? "You", kind: "user" } : null}
+              markers={nearby.items.slice(0, 12).map((provider) => ({
+                id: provider.id,
+                lat: provider.lat as number,
+                lng: provider.lng as number,
+                label: provider.businessName.replace(/\s*\(demo\)$/i, ""),
+                kind: provider.type === "vendor" ? "shop" : provider.type,
+              }))}
+              height={172}
+              interactive={false}
+              followUser={false}
+            />
+            <span className="nearest-chip">
+              <Navigation size={12} /> {nearby.loading ? "Locating help…" : `${nearby.items.length} nearby`}
+            </span>
+            {geo.point && <span className="nearby-map-card__you"><span className="live-dot" /> Your location</span>}
           </div>
+          <NearbyProviders items={nearby.items.slice(0, 5)} loading={nearby.loading} onOpen={openProvider} />
         </section>
 
         <section className="quick-section">
@@ -468,9 +613,9 @@ function HomeScreen({
               { label: "Find mechanic", helper: "Mechanics nearby", icon: Search, start: "explore" as DriverFeatureStart },
               { label: "Book service", helper: "Pick a time", icon: Clock3, start: "booking" as DriverFeatureStart },
               { label: "Request tow", helper: "Flatbed or standard", icon: Truck, start: "tow" as DriverFeatureStart },
-              { label: "Find parts", helper: "Matched to your car", icon: ShoppingBag, start: "parts" as DriverFeatureStart },
-            ].map(({ label, helper, icon: Icon, start }) => (
-              <button key={label} onClick={() => onNavigate(start)} type="button">
+              { label: "Find parts", helper: "Shops near you", icon: ShoppingBag, start: "parts" as DriverFeatureStart },
+            ].map(({ label, helper, icon: Icon, start }, index) => (
+              <button key={label} onClick={() => onNavigate(start)} style={{ "--tile-index": index } as React.CSSProperties} type="button">
                 <span><Icon size={25} strokeWidth={1.75} /></span>
                 <strong>{label}</strong>
                 <small>{helper}</small>
@@ -478,68 +623,6 @@ function HomeScreen({
             ))}
           </div>
         </section>
-
-        <section className="product-stack">
-          <div className="section-heading">
-            <div>
-              <span className="overline">POPULAR BUNDLES</span>
-              <h2>High-value service plans</h2>
-            </div>
-            <button className="text-button" onClick={() => onNavigate("parts")} type="button">View all</button>
-          </div>
-          <div className="product-stack__grid">
-            {[
-              { title: "Roadside Rescue", tag: "Most booked", price: "GHS 120", description: "Battery jump, tire change, and lockout support in under 20 minutes.", icon: LifeBuoy },
-              { title: "Premium Service", tag: "Best value", price: "GHS 420", description: "Full inspection, oil/filter, brake check, and 24-hour follow-up.", icon: Wrench },
-              { title: "Parts + Fitment", tag: "Same day", price: "GHS 290", description: "Selected parts, delivery, and installation coordination for your car.", icon: ShoppingBag },
-            ].map(({ title, tag, price, description, icon: Icon }) => (
-              <button key={title} className="product-card" onClick={() => onNavigate("explore")} type="button">
-                <div className="product-card__head">
-                  <span className="product-card__icon"><Icon size={18} /></span>
-                  <span className="product-card__tag">{tag}</span>
-                </div>
-                <div className="product-card__body">
-                  <strong>{title}</strong>
-                  <p>{description}</p>
-                </div>
-                <div className="product-card__meta">
-                  <span>{price}</span>
-                  <ArrowRight size={16} />
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="insight-stack">
-          <div className="section-heading">
-            <div>
-              <span className="overline">RECOMMENDED</span>
-              <h2>Smart for your Corolla</h2>
-            </div>
-          </div>
-          <div className="insight-grid">
-            {[
-              { label: "Battery health", value: "Good", detail: "All systems normal", tone: "green" },
-              { label: "Brake service", value: "Due soon", detail: "In 800 km", tone: "amber" },
-              { label: "Tire rotation", value: "Booked", detail: "Thu, 9:30 AM", tone: "blue" },
-            ].map(({ label, value, detail, tone }) => (
-              <div className={`insight-card insight-card--${tone}`} key={label}>
-                <span>{label}</span>
-                <strong>{value}</strong>
-                <small>{detail}</small>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="appointment">
-          <div className="date-tile"><strong>18</strong><span>OCT</span></div>
-          <div><span className="overline">UPCOMING</span><h3>Routine service</h3><p>9:30 AM · AutoHaus Accra</p></div>
-          <ArrowRight size={18} />
-        </section>
-        <section className="home-status-card"><Gauge size={19} /><div><span className="overline">MAINTENANCE</span><strong>Next service in 1,820 km</strong><small>Suggested interval · Oil and filter</small></div><ChevronRight size={17} /></section>
-        <section className="home-status-card"><History size={19} /><div><span className="overline">RECENT ACTIVITY</span><strong>Brake pads order confirmed</strong><small>Accra Parts Hub · GHS 680</small></div><ChevronRight size={17} /></section>
       </main>
       <BottomNav onEmergency={onEmergency} onHome={() => undefined} onNavigate={onNavigate} onProfile={onProfile} />
     </div>
@@ -592,8 +675,16 @@ function ProfilePanelSheet({
   close: () => void;
   setTheme: (theme: "dark" | "light") => void;
   theme: "dark" | "light";
-  user: { name: string; phone: string; email: string } | null;
+  user: User | null;
 }) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const updateProfile = useAppStore((state) => state.updateProfile);
+  const [name, setName] = useState(user?.name ?? "");
+  const [email, setEmail] = useState(user?.email ?? "");
+  const [avatarDraft, setAvatarDraft] = useState<string | null | undefined>(undefined);
+  const [processingPhoto, setProcessingPhoto] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [serviceUpdates, setServiceUpdates] = useState(true);
   const [reminders, setReminders] = useState(true);
   const [promotions, setPromotions] = useState(false);
@@ -618,6 +709,46 @@ function ProfilePanelSheet({
     setNotice(`${label} is ready for the next release, and this preview keeps the flow moving without breaking the demo.`);
   };
 
+  const previewAvatarUrl = avatarDraft === undefined ? user?.avatarUrl : avatarDraft;
+
+  const handlePhotoPick = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setFeedback(null);
+    setProcessingPhoto(true);
+    try {
+      setAvatarDraft(await prepareProfileImage(file));
+      setFeedback({ tone: "success", message: "Photo ready. Save changes to keep it on your profile." });
+    } catch (error) {
+      setFeedback({ tone: "error", message: error instanceof Error ? error.message : "We couldn't use that photo." });
+    } finally {
+      setProcessingPhoto(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!name.trim()) {
+      setFeedback({ tone: "error", message: "Enter your name before saving." });
+      return;
+    }
+    setFeedback(null);
+    setSaving(true);
+    try {
+      await updateProfile({
+        name: name.trim(),
+        email: email.trim() || null,
+        ...(avatarDraft === undefined ? {} : { avatarUrl: avatarDraft }),
+      });
+      setAvatarDraft(undefined);
+      setFeedback({ tone: "success", message: "Your profile and photo have been saved." });
+    } catch (error) {
+      setFeedback({ tone: "error", message: error instanceof Error ? error.message : "We couldn't save your profile." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="profile-panel" role="dialog" aria-modal="true" aria-label={titles[panel]}>
       <header>
@@ -627,6 +758,11 @@ function ProfilePanelSheet({
       </header>
       <main>
         {notice && <div className="profile-demo-banner">{notice}</div>}
+        {feedback && (
+          <div className={`profile-feedback profile-feedback--${feedback.tone}`} role={feedback.tone === "error" ? "alert" : "status"}>
+            {feedback.message}
+          </div>
+        )}
         {panel === "appearance" && (
           <>
             <p className="profile-panel-intro">Choose the appearance that feels best for you. Your preference is saved on this device.</p>
@@ -646,14 +782,45 @@ function ProfilePanelSheet({
         )}
         {panel === "personal" && (
           <>
-            <div className="profile-photo-editor"><div className="avatar avatar--large">{initials(user?.name)}</div><button onClick={() => handleDemoAction("Photo updates")} type="button">Change photo</button></div>
+            <div className="profile-photo-editor">
+              <UserAvatar avatarUrl={previewAvatarUrl} className="avatar--large" name={user?.name} />
+              <div className="profile-photo-editor__copy">
+                <strong>Profile photo</strong>
+                <small>JPG, PNG or WebP · resized automatically</small>
+                <div className="profile-photo-editor__actions">
+                  <button disabled={processingPhoto || saving} onClick={() => fileInput.current?.click()} type="button">
+                    {processingPhoto ? "Preparing…" : "Change photo"}
+                  </button>
+                  {previewAvatarUrl && (
+                    <button
+                      className="profile-photo-remove"
+                      disabled={saving}
+                      onClick={() => { setAvatarDraft(null); setFeedback({ tone: "success", message: "Photo removed from the preview. Save changes to keep it off your profile." }); }}
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <input
+                  accept="image/jpeg,image/png,image/webp"
+                  aria-label="Choose profile photo"
+                  className="profile-photo-input"
+                  onChange={(event) => { void handlePhotoPick(event); }}
+                  ref={fileInput}
+                  type="file"
+                />
+              </div>
+            </div>
             <div className="profile-form">
-              <label>Full name<input defaultValue={user?.name ?? ""} /></label>
-              <label>Phone number<div className="profile-phone"><span>+233</span><input defaultValue={(user?.phone ?? "").replace(/^\+?233/, "").trim()} /></div></label>
-              <label>Email address<input defaultValue={user?.email ?? ""} type="email" /></label>
+              <label>Full name<input onChange={(event) => setName(event.target.value)} value={name} /></label>
+              <label>Phone number<div className="profile-phone"><span>+233</span><input defaultValue={(user?.phone ?? "").replace(/^\+?233/, "").trim()} readOnly /></div></label>
+              <label>Email address<input onChange={(event) => setEmail(event.target.value)} type="email" value={email} /></label>
               <label>Date of birth<input defaultValue="1991-08-14" type="date" /></label>
             </div>
-            <Button onClick={() => handleDemoAction("Profile edits")}>Save changes</Button>
+            <Button disabled={saving || processingPhoto} onClick={() => { void handleSaveProfile(); }}>
+              {saving ? "Saving…" : "Save changes"}
+            </Button>
           </>
         )}
         {panel === "payments" && (
@@ -791,7 +958,7 @@ function ProfileScreen({
       <AppHeader title="Profile" trailing={<IconButton icon={Settings} label="Profile settings" onClick={() => setPanel("personal")} />} />
       <main className="profile-content">
         <section className="profile-identity">
-          <div className="avatar avatar--large">{initials(user?.name)}</div>
+          <UserAvatar avatarUrl={user?.avatarUrl} className="avatar--large" name={user?.name} />
           <div><span className="overline">VEHICLE OWNER</span><h1>{user?.name ?? "MechNow driver"}</h1><p>{user?.phone ?? "No phone number"}</p></div>
           <button aria-label="Edit personal information" onClick={() => setPanel("personal")} type="button"><ChevronRight size={19} /></button>
         </section>
@@ -1258,7 +1425,7 @@ function TrackingScreen({
             </div>
           ))}
         </div>
-        <div className="safety-tip"><ShieldCheck size={18} /><span><strong>Live location sharing is active</strong><small>Your location updates while this request is in progress.</small></span></div>
+        <div className="safety-tip"><ShieldCheck size={18} /><span><strong>{isFreshLocation(request?.providerLocation) ? "Provider is sharing live location" : "Live tracking is active"}</strong><small>{isFreshLocation(request?.providerLocation) ? "The map updates as your provider moves toward you." : "Your location updates while this request is in progress."}</small></span></div>
         <SafetyActions onCancel={() => onScenario("cancelled")} />
         {(status === "arrived" || status === "diagnosing" || status === "awaitingApproval" || status === "repairing") && (
           <div className="sticky-action" style={{ padding: 0, marginTop: 12 }}>
@@ -1621,14 +1788,27 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       setProviderPoint(null);
       return;
     }
-    const offset = 0.012;
-    const start = { lat: target.lat + offset, lng: target.lng - offset };
     const status = liveRequest?.status ?? "requested";
     if (status === "arrived" || status === "diagnosing" || status === "awaitingApproval" || status === "repairing" || status === "awaitingParts" || status === "completed") {
       setProviderPoint({ lat: target.lat, lng: target.lng });
-      setRouteCoords([[start.lng, start.lat], [target.lng, target.lat]]);
+      setRouteCoords(null);
       return;
     }
+    const live = liveRequest?.providerLocation;
+    if (isFreshLocation(live)) {
+      const start = { lat: live!.lat, lng: live!.lng };
+      setProviderPoint(start);
+      let active = true;
+      void getDrivingRoute(start, target).then((route) => {
+        if (!active) return;
+        setRouteCoords(route?.coordinates?.length ? route.coordinates : [[start.lng, start.lat], [target.lng, target.lat]]);
+      });
+      return () => { active = false; };
+    }
+    // Until the provider shares a location, animate a plausible approach so the
+    // customer still sees progress instead of an empty map.
+    const offset = 0.012;
+    const start = { lat: target.lat + offset, lng: target.lng - offset };
     let active = true;
     void getDrivingRoute(start, target).then((route) => {
       if (!active) return;
@@ -1639,11 +1819,12 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       setProviderPoint({ lat: coords[idx][1], lng: coords[idx][0] });
     });
     return () => { active = false; };
-  }, [liveRequest?.location.lat, liveRequest?.location.lng, liveRequest?.status, requestLocation, screen]);
+  }, [liveRequest?.location.lat, liveRequest?.location.lng, liveRequest?.providerLocation?.updatedAt, liveRequest?.status, requestLocation, screen]);
 
   useEffect(() => {
     if (screen !== "tracking" || !routeCoords || routeCoords.length < 2) return;
     const status = liveRequest?.status ?? "requested";
+    if (isFreshLocation(liveRequest?.providerLocation)) return;
     if (["arrived", "diagnosing", "awaitingApproval", "repairing", "awaitingParts", "completed", "cancelled"].includes(status)) return;
     let index = Math.min(routeCoords.length - 2, Math.max(0, Math.floor(routeCoords.length * 0.35)));
     const timer = window.setInterval(() => {
@@ -1653,7 +1834,7 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       if (index >= routeCoords.length - 1) window.clearInterval(timer);
     }, 4000);
     return () => window.clearInterval(timer);
-  }, [liveRequest?.status, routeCoords, screen]);
+  }, [liveRequest?.providerLocation?.updatedAt, liveRequest?.status, routeCoords, screen]);
 
   const cancelActiveRequest = async () => {
     const id = backendRequestId.current;

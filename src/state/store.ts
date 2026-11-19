@@ -5,7 +5,7 @@ import { clearToken } from "../services/http";
 import { ApiError } from "../services/mockApi";
 import { notificationService } from "../services/notifications";
 import { vehicleService } from "../services/vehicles";
-import type { ProviderProfile } from "../services/apiTypes";
+import type { ProfileUpdate, ProviderProfile } from "../services/apiTypes";
 import { transitionEmergency, type EmergencyRequest, type EmergencyStatus } from "./emergencyMachine";
 import type { CartItem, Notification, Theme, User, Vehicle } from "./types";
 
@@ -22,6 +22,7 @@ interface AppState {
   hydrate: () => Promise<void>;
   signIn: (user: User) => Promise<void>;
   signOut: () => Promise<void>;
+  updateProfile: (input: ProfileUpdate) => Promise<User>;
   setVehicle: (vehicle: Vehicle | null) => void;
   updateEmergency: (details: Pick<EmergencyRequest, "problem" | "location" | "providerId">) => void;
   startEmergency: () => void;
@@ -98,6 +99,12 @@ export const useAppStore = create<AppState>()(
             notifications: [],
           });
         }
+      },
+
+      updateProfile: async (input) => {
+        const user = await authService.updateProfile(input);
+        set({ user });
+        return user;
       },
 
       setVehicle: (activeVehicle) => set({ activeVehicle }),

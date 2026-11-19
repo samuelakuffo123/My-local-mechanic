@@ -23,16 +23,20 @@ import {
   Settings2,
   ShieldCheck,
   ShoppingBag,
+  Star,
   Truck,
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { useAppStore } from "../../state/store";
 import { bookingService } from "../../services/booking";
 import { towService } from "../../services/tow";
 import { vehicleService, type ServiceHistoryItem } from "../../services/vehicles";
-import type { ServiceRequest, Vehicle } from "../../services/apiTypes";
+import type { NearbyProvider, ServiceRequest, Vehicle } from "../../services/apiTypes";
+import { LiveMap } from "../../components/LiveMap";
+import { useGeolocation } from "../../hooks/useGeolocation";
+import { useNearbyProviders } from "../../hooks/useNearbyProviders";
 
 const today = new Date();
 const roadworthyDate = new Intl.DateTimeFormat("en-GH", {
@@ -59,6 +63,12 @@ function vehicleMeta(vehicle: Vehicle) {
 
 function formatMoney(value: number) {
   return `GHS ${Math.round(value).toLocaleString("en-GH")}`;
+}
+
+function providerKindMeta(type: NearbyProvider["type"]) {
+  if (type === "tow") return { label: "Tow operator", icon: Truck, tone: "tow" as const };
+  if (type === "vendor") return { label: "Parts shop", icon: ShoppingBag, tone: "shop" as const };
+  return { label: "Mechanic", icon: Wrench, tone: "mechanic" as const };
 }
 
 function formatDay(value: string) {
@@ -194,22 +204,197 @@ function ModuleHub({ go, onExit }: { go: (page: Page) => void; onExit: () => voi
   );
 }
 
-function Explore({ back }: { back: () => void }) {
+function Explore({ back, go }: { back: () => void; go: (page: Page) => void }) {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [filter, setFilter] = useState<"all" | NearbyProvider["type"]>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(params.get("provider"));
+  const geo = useGeolocation({ immediate: true });
+  const nearby = useNearbyProviders(geo.point ? { lat: geo.point.lat, lng: geo.point.lng } : null);
+
+  const visible = useMemo(
+    () => (filter === "all" ? nearby.items : nearby.items.filter((provider) => provider.type === filter)),
+    [filter, nearby.items],
+  );
+  const selected = visible.find((provider) => provider.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (selectedId && !visible.some((provider) => provider.id === selectedId)) setSelectedId(null);
+  }, [selectedId, visible]);
+
+  const focus = useMemo(() => {
+    if (selected?.lat != null && selected?.lng != null) return { lat: selected.lat, lng: selected.lng };
+    if (geo.point) return { lat: geo.point.lat, lng: geo.point.lng };
+    return null;
+  }, [geo.point, selected?.id, selected?.lat, selected?.lng]);
+
+  const counts = useMemo(
+    () => ({
+      all: nearby.items.length,
+      mechanic: nearby.items.filter((provider) => provider.type === "mechanic").length,
+      tow: nearby.items.filter((provider) => provider.type === "tow").length,
+      vendor: nearby.items.filter((provider) => provider.type === "vendor").length,
+    }),
+    [nearby.items],
+  );
+
+  const requestProvider = (provider: NearbyProvider) => {
+    if (provider.type === "tow") {
+      go("tow");
+      return;
+    }
+    if (provider.type === "vendor") {
+      go("parts");
+      return;
+    }
+    navigate("/app/emergency/problem");
+  };
+
+  const openDirections = (provider: NearbyProvider) => {
+    if (provider.lat == null || provider.lng == null) return;
+    window.open(
+      `https://www.google.com/maps/dir/?api=1&destination=${provider.lat},${provider.lng}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
+
   return (
-    <div className="s2-screen">
-      <Header onBack={back} title="Explore" />
-      <main className="s2-vehicles">
-        <section className="s2-tab-placeholder">
-          <MapPin size={28} />
-          <h2>Find help on the map</h2>
-          <p>Use Home to see nearby providers and start an emergency request. More discovery tools are coming soon.</p>
+    <div className="s2-screen s2-explore">
+      <Header onBack={back} eyebrow="NEAR YOU" title="Explore" />
+      <main className="explore-main">
+        <h1 className="sr-only">Explore verified providers near you</h1>
+        <div className="explore-filters" role="group" aria-label="Filter nearby providers">
+          {([
+            ["all", "All", counts.all],
+            ["mechanic", "Mechanics", counts.mechanic],
+            ["tow", "Tow", counts.tow],
+            ["vendor", "Shops", counts.vendor],
+          ] as const).map(([key, label, count]) => (
+            <button
+              aria-pressed={filter === key}
+              className={filter === key ? "active" : ""}
+              key={key}
+              onClick={() => setFilter(key)}
+              type="button"
+            >
+              {label}
+              <span>{count}</span>
+            </button>
+          ))}
+        </div>
+
+        <section className="explore-map" aria-label="Nearby providers map">
+          <LiveMap
+            user={geo.point ? { lat: geo.point.lat, lng: geo.point.lng, label: geo.point.label ?? "You", kind: "user" } : null}
+            markers={visible.map((provider) => ({
+              id: provider.id,
+              lat: provider.lat as number,
+              lng: provider.lng as number,
+              label: provider.businessName.replace(/\s*\(demo\)$/i, ""),
+              kind: provider.type === "vendor" ? "shop" : provider.type,
+              active: provider.id === selectedId,
+            }))}
+            focus={focus}
+            onMarkerSelect={setSelectedId}
+            height={286}
+            interactive
+          />
+          <button className="explore-recenter" onClick={() => geo.request()} type="button">
+            <Navigation size={15} />
+            {geo.loading ? "Locating…" : geo.point ? "Recenter" : "Find me"}
+          </button>
+          {!nearby.loading && nearby.items.length === 0 && (
+            <div className="explore-map__empty">
+              <MapPin size={20} />
+              <strong>No verified providers on the map yet</strong>
+              <small>Try again in a moment or request help directly.</small>
+            </div>
+          )}
         </section>
-        <section className="s2-profile-actions">
-          <SButton onClick={() => navigate("/app/home")} icon={Navigation}>
-            Go to Home
-          </SButton>
-        </section>
+
+        <div className="explore-summary">
+          <div>
+            <span className="overline">VERIFIED DIRECTORY</span>
+            <h2>{nearby.loading ? "Finding help around you…" : `${visible.length} ${visible.length === 1 ? "place" : "places"} nearby`}</h2>
+          </div>
+          {geo.error && <small>{geo.error}</small>}
+        </div>
+
+        {nearby.loading ? (
+          <div className="explore-list" aria-hidden="true">
+            {[0, 1, 2].map((index) => <span className="explore-skeleton" key={index} />)}
+          </div>
+        ) : visible.length ? (
+          <section className="explore-list" aria-label="Nearby providers">
+            {visible.map((provider, index) => {
+              const meta = providerKindMeta(provider.type);
+              const Icon = meta.icon;
+              return (
+                <button
+                  aria-pressed={provider.id === selectedId}
+                  className={`explore-card explore-card--${meta.tone}${provider.id === selectedId ? " is-selected" : ""}`}
+                  key={provider.id}
+                  onClick={() => setSelectedId(provider.id)}
+                  style={{ "--card-index": index } as React.CSSProperties}
+                  type="button"
+                >
+                  <span className="explore-card__icon"><Icon size={20} /></span>
+                  <span className="explore-card__body">
+                    <small><BadgeCheck size={12} fill="currentColor" /> VERIFIED {meta.label.toUpperCase()}</small>
+                    <strong>{provider.businessName.replace(/\s*\(demo\)$/i, "")}</strong>
+                    <p>{provider.specialisations.slice(0, 2).join(" · ") || provider.address || provider.region || "Accra"}</p>
+                    <em>
+                      <span><Star size={12} fill="currentColor" /> {provider.rating > 0 ? provider.rating.toFixed(1) : "New"}</span>
+                      <span><MapPin size={12} /> {provider.distanceKm != null ? `${provider.distanceKm} km` : provider.region ?? "Accra"}</span>
+                      <span className={provider.available ? "is-open" : "is-busy"}>{provider.available ? "Open now" : "Busy"}</span>
+                    </em>
+                  </span>
+                  <ChevronRight size={17} />
+                </button>
+              );
+            })}
+          </section>
+        ) : (
+          <section className="explore-empty">
+            <span><Wrench size={22} /></span>
+            <h2>Nothing in this category yet</h2>
+            <p>Switch the filter or request roadside help directly — we'll find the closest verified provider.</p>
+            <SButton icon={LifeBuoy} onClick={() => navigate("/app/emergency/problem")}>Request emergency help</SButton>
+          </section>
+        )}
+
+        {selected && (
+          <section className="explore-detail">
+            <div className="explore-detail__head">
+              <span className={`explore-card__icon explore-card__icon--${providerKindMeta(selected.type).tone}`}>
+                {(() => {
+                  const Icon = providerKindMeta(selected.type).icon;
+                  return <Icon size={20} />;
+                })()}
+              </span>
+              <div>
+                <small>{providerKindMeta(selected.type).label} · {selected.available ? "Open now" : "Busy"}</small>
+                <strong>{selected.businessName.replace(/\s*\(demo\)$/i, "")}</strong>
+                <p>{selected.address ?? selected.region ?? "Accra"}</p>
+              </div>
+              <button aria-label="Close details" onClick={() => setSelectedId(null)} type="button">×</button>
+            </div>
+            <div className="explore-detail__meta">
+              <span><Star size={13} fill="currentColor" /> {selected.rating > 0 ? selected.rating.toFixed(1) : "New"}</span>
+              <span><MapPin size={13} /> {selected.distanceKm != null ? `${selected.distanceKm} km away` : "Distance pending"}</span>
+              {selected.lat != null && selected.lng != null && <span><Clock3 size={13} /> ~{Math.max(3, Math.round((selected.distanceKm ?? 4) * 3))} min</span>}
+            </div>
+            <div className="explore-detail__actions">
+              <SButton onClick={() => requestProvider(selected)}>
+                {selected.type === "vendor" ? "Browse parts" : selected.type === "tow" ? "Request tow" : "Request help"}
+              </SButton>
+              <SButton disabled={selected.lat == null} icon={Navigation} onClick={() => openDirections(selected)} variant="secondary">
+                Directions
+              </SButton>
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );
@@ -893,7 +1078,7 @@ export default function DriverFeatures({ start = "hub", onExit }: { start?: Driv
       case "hub":
         return <ModuleHub go={go} onExit={onExit} />;
       case "explore":
-        return <Explore back={back} />;
+        return <Explore back={back} go={go} />;
       case "booking":
         return <Booking back={back} go={go} onCreated={setLastBooking} vehicle={currentVehicle} vehiclesLoading={loadingVehicles} />;
       case "booking-confirmed":

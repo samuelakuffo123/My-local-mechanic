@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, Check, Mail, Phone, Wrench } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { DeviceFrame } from "../../components/DeviceFrame";
 import { useAppStore } from "../../state/store";
-import { authService } from "../../services/auth";
+import { authService, type GoogleConfig } from "../../services/auth";
+import { preloadGoogleIdentity, requestGoogleAccessToken } from "../../services/googleIdentity";
 import { ApiError } from "../../services/mockApi";
 import type { Role } from "../../state/types";
 
@@ -58,7 +59,24 @@ export function AuthPlaceholder() {
   const [devCode, setDevCode] = useState<string | null>(seed?.devCode ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [googleNotice, setGoogleNotice] = useState(false);
+  const [googleConfig, setGoogleConfig] = useState<GoogleConfig | null>(null);
+  const [googleNotice, setGoogleNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void authService.googleConfig()
+      .then((result) => {
+        if (!active) return;
+        setGoogleConfig(result);
+        if (result.enabled && result.clientId) void preloadGoogleIdentity().catch(() => undefined);
+      })
+      .catch(() => {
+        if (active) setGoogleConfig({ enabled: false, clientId: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const title = view === "signup" ? "Create your account" : view === "verify" ? "Verify your phone" : "Welcome back";
   const subtitle =
@@ -100,6 +118,29 @@ export function AuthPlaceholder() {
       clearPendingOtp();
       await signIn(session.user);
       navigate(homeFor(session.user.role));
+    });
+
+  const googleSignIn = () =>
+    run(async () => {
+      setGoogleNotice(null);
+      if (!googleConfig?.enabled || !googleConfig.clientId) {
+        setGoogleNotice("Google sign-in isn’t configured yet. Use your phone number to continue.");
+        return;
+      }
+      try {
+        const accessToken = await requestGoogleAccessToken(googleConfig.clientId);
+        const session = await authService.signInWithGoogle(accessToken, view === "signup" ? role : undefined);
+        clearPendingOtp();
+        await signIn(session.user);
+        navigate(homeFor(session.user.role));
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : "";
+        if (/cancelled|didn't complete|took too long|isn't configured|could not load|didn't return/i.test(message)) {
+          setGoogleNotice(message);
+          return;
+        }
+        throw caught;
+      }
     });
 
   return (
@@ -144,7 +185,12 @@ export function AuthPlaceholder() {
                 void requestCode();
               }}
             >
-              <button className="auth-google" onClick={() => setGoogleNotice(true)} type="button">
+              <button
+                className="auth-google"
+                disabled={busy || googleConfig === null}
+                onClick={googleSignIn}
+                type="button"
+              >
                 <svg aria-hidden="true" viewBox="0 0 48 48">
                   <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5Z" transform="translate(0 4)" />
                   <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.73 7.18l7.65 5.94c4.46-4.13 7.12-10.2 7.12-17.59Z" />
@@ -155,7 +201,7 @@ export function AuthPlaceholder() {
               </button>
               {googleNotice && (
                 <p className="auth-google-notice" role="status">
-                  Google sign-in isn’t configured yet. Use your phone number to continue.
+                  {googleNotice}
                 </p>
               )}
               <div className="auth-divider"><span>or continue with phone</span></div>

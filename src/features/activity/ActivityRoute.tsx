@@ -15,6 +15,7 @@ type ActivityItem = {
   date: string;
   state: string;
   kind: "booking" | "emergency" | "payment";
+  trackId?: string;
 };
 
 function formatDate(value: string) {
@@ -69,6 +70,7 @@ export function ActivityRoute() {
             date: emergency.updatedAt || emergency.createdAt,
             state: getEmergencyState(emergency.status),
             kind: "emergency" as const,
+            trackId: emergency.status === "completed" || emergency.status === "cancelled" ? undefined : emergency.id,
           }] : []),
         ];
         activity.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
@@ -106,6 +108,11 @@ export function ActivityRoute() {
                     <div className="activity-card__title"><strong>{item.title}</strong><span>{item.state}</span></div>
                     <p>{item.detail}</p>
                     {item.date && <time dateTime={item.date}>{formatDate(item.date)}</time>}
+                    {item.trackId && (
+                      <Link className="activity-track" to={`/app/track/${item.trackId}`}>
+                        Track provider live <ArrowRight size={14} />
+                      </Link>
+                    )}
                   </div>
                 </article>
               );

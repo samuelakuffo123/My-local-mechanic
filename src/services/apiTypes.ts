@@ -11,6 +11,13 @@ export interface Session {
   user: User;
 }
 
+export interface ProfileUpdate {
+  name?: string;
+  email?: string | null;
+  /** A compressed data URL, or null to remove the current photo. */
+  avatarUrl?: string | null;
+}
+
 export interface ProviderProfile {
   id: string;
   userId: string;
@@ -23,6 +30,14 @@ export interface ProviderProfile {
   available: boolean;
   rating: number;
   reliability: number;
+  lat: number | null;
+  lng: number | null;
+  address: string | null;
+}
+
+/** A verified provider returned by nearby discovery, with distance from the customer. */
+export interface NearbyProvider extends ProviderProfile {
+  distanceKm: number | null;
 }
 
 export type RequestKind = "emergency" | "booking" | "tow";
@@ -48,6 +63,8 @@ export interface ServiceRequest {
   kind: RequestKind;
   problem: string;
   location: { label: string | null; lat: number | null; lng: number | null };
+  /** Last position published by the assigned provider, if they are sharing. */
+  providerLocation: { lat: number; lng: number; updatedAt: string } | null;
   region: string | null;
   status: RequestStatus;
   version: number;
