@@ -11,7 +11,9 @@ npm run api
 npm run dev
 ```
 
-The API listens on `127.0.0.1:8787`; Vite proxies `/api` requests to it. SQLite data is stored in `data/mechnow.sqlite` by default. Override `DATABASE_PATH` or `API_PORT` as needed.
+The API listens on `127.0.0.1:8787`; Vite proxies `/api` requests to it. SQLite data is stored in `.data/mechnow.sqlite` by default. Override `DATABASE_PATH` or `API_PORT` as needed.
+
+The discovery map only shows verified providers that have coordinates. For a populated local map, start the API with demo data: `SEED_DEMO_DATA=true npm run api` on macOS/Linux, or `$env:SEED_DEMO_DATA="true"; npm run api` in PowerShell. Demo data is refused when `NODE_ENV=production`.
 
 ## Install on a phone
 
@@ -31,9 +33,7 @@ cloudflared tunnel --url http://localhost:8443
 
 Open the printed `https://….trycloudflare.com` address on the phone, then choose **Install app** (Android) or **Share → Add to Home Screen** (iPhone). The quick-tunnel address changes whenever the tunnel restarts, and the installed app only works while the laptop, the API and the tunnel stay running.
 
-For a permanent public deployment, build the client and host it on an HTTPS origin, then open the site on your phone. The app shell and static assets are cached for launching the interface offline; API-backed actions still need the API and an internet connection. Service-worker updates are applied by the browser.
-
-The frontend must be served from the site root because its manifest and service worker use `/` paths. Configure the production `/api` route to proxy to the Node API, and keep the API database on persistent storage. The current SQLite API and development OTP/SMS setup are not a production hosting/auth solution by themselves.
+For a permanent public deployment, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The repository includes a Render Blueprint that serves the built client and `/api` from one HTTPS origin with a persistent disk for SQLite. The frontend must be served from the site root because its manifest and service worker use `/` paths, and the database must stay on persistent storage. The development OTP/SMS and payment adapters are not production-ready by themselves; the deployment guide lists the required providers and remaining gaps.
 
 ## Mapbox pickup maps
 
@@ -43,17 +43,25 @@ The Mapbox public token is sent to browsers by design. Restrict it to the app's 
 
 Emergency requests, including their optional latitude and longitude, are already saved to the signed-in user's SQLite record by the API; no separate map database is required. Coordinates are stored in the app only when the user saves the request; using Mapbox features sends address searches or selected coordinates to Mapbox for lookup.
 
-For deployment, set `NODE_ENV=production` and configure `CORS_ORIGINS` with the exact HTTPS origin serving the client. Route that origin's `/api` path to this server with a reverse proxy. Keep the database file and its backups private, use HTTPS, and apply normal database backup/retention controls. API responses include an `X-Request-Id` header and the same `requestId` in error bodies for support diagnostics.
+## Google sign-in
+
+Google sign-in uses the Google Identity Services token model. Create a **Web application** OAuth client in Google Cloud, configure the OAuth consent screen, and add the app's origins to **Authorized JavaScript origins** (`http://localhost:8443` locally, plus the current `https://….trycloudflare.com` origin when testing on a phone). Add `GOOGLE_CLIENT_ID=<your web client ID>` to the gitignored `.env` file and restart the API. The API loads `.env` at startup; explicitly exported environment variables take precedence. No client secret is required: the browser receives a short-lived Google access token, and the API verifies it against Google's `tokeninfo` endpoint before issuing the normal MechNow session.
+
+A verified Google email is linked to an existing account with that email, or used to create a new driver account. Users can still sign in with their phone number. If `GOOGLE_CLIENT_ID` is unset, the Google button explains that sign-in is not configured. Because a quick-tunnel origin changes on every restart, update the authorized origin in Google Cloud whenever the tunnel URL changes.
+
+For deployment, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The included Render Blueprint runs the API and serves the built client from the same HTTPS origin, keeps SQLite on a persistent disk, and sets `NODE_ENV=production`, `API_HOST=0.0.0.0` and `TRUST_PROXY=true`. If you split the client and API across origins instead, set `CORS_ORIGINS` (or `PUBLIC_ORIGIN`) to the exact HTTPS origin serving the client and configure the client's `/api` path to reach this server. Keep the database file and its backups private, use HTTPS, and apply normal backup/retention controls. API responses include an `X-Request-Id` header and the same `requestId` in error bodies for support diagnostics.
 
 ## API
 
-Requests with a body must send `Content-Type: application/json`, and browser mutation requests must come from an origin listed in `CORS_ORIGINS`. Authenticated endpoints use a bearer token stored by the client; account data and records are scoped to that session. The local Vite proxy rewrites tunnel origins to the first configured `CORS_ORIGINS` value so the phone-install flow keeps working.
+Requests with a body must send `Content-Type: application/json`, and browser mutation requests must come from an allowed origin: `CORS_ORIGINS`, `PUBLIC_ORIGIN`, or the platform's own public URL (`RENDER_EXTERNAL_URL` / `RAILWAY_PUBLIC_DOMAIN`). Authenticated endpoints use a bearer token stored by the client; account data and records are scoped to that session. The local Vite proxy rewrites tunnel origins to the first configured `CORS_ORIGINS` value so the phone-install flow keeps working.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | Health check |
 | POST | `/api/auth/register` | Create a driver account |
 | POST | `/api/auth/login` | Start a session |
+| GET | `/api/auth/google/config` | Check whether Google sign-in is configured |
+| POST | `/api/auth/google` | Verify a Google access token and start a session |
 | POST | `/api/auth/logout` | Revoke the current session |
 | GET | `/api/auth/me` | Restore the current session |
 | GET, POST | `/api/bookings` | List or create bookings for an owned vehicle |
@@ -62,6 +70,8 @@ Requests with a body must send `Content-Type: application/json`, and browser mut
 | POST | `/api/emergency/cancel` | Cancel an owned emergency request |
 | GET, POST | `/api/payments` | List or create idempotent pending payment intents |
 | GET | `/api/providers`, `/api/providers/:id` | Search the current sample provider catalog |
+| GET | `/api/providers/nearby` | Verified mechanics, tow operators and shops near `lat`/`lng` |
+| POST | `/api/service-requests/:id/provider-location` | Assigned provider publishes their live position |
 | GET | `/api/parts?q=...` | Search the current parts catalog |
 | GET, PUT | `/api/cart` | Read or save the signed-in user's cart |
 | POST | `/api/tow/estimate` | Calculate a tow estimate |
