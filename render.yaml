@@ -1,0 +1,48 @@
+# Render Blueprint: one HTTPS service serving the client bundle and /api.
+# The SQLite database lives on the mounted disk, so it survives deploys.
+services:
+  - type: web
+    name: mechnow
+    runtime: node
+    plan: starter
+    region: frankfurt
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.18.0
+      - key: NODE_ENV
+        value: production
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: API_PORT
+        value: "10000"
+      - key: DATABASE_PATH
+        value: /var/data/mechnow.sqlite
+      - key: TRUST_PROXY
+        value: "true"
+      - key: SEED_DEMO_DATA
+        value: "false"
+      # Public Mapbox token, needed at build time. Restrict it to this domain.
+      - key: VITE_MAPBOX_ACCESS_TOKEN
+        sync: false
+      # Google Identity Services web client ID.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      # First admin account. Password must be 12+ characters.
+      - key: ADMIN_PHONE
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Live mobile-money payments. Leave unset to keep payments disabled.
+      - key: PAYMENTS_PROVIDER
+        value: paystack
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_WEBHOOK_SECRET
+        sync: false
+    disk:
+      name: mechnow-data
+      mountPath: /var/data
+      sizeGB: 1

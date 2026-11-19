@@ -7,11 +7,15 @@
     "dev": "vite",
     "api": "node server/index.ts",
     "server": "node server/index.ts",
+    "start": "node server/index.ts",
     "test:api": "node --test \"server/tests/**/*.test.ts\"",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt",
     "server:test": "node --test \"server/tests/**/*.test.ts\""
+  },
+  "engines": {
+    "node": ">=24"
   },
   "dependencies": {
     "lucide-react": "^1.52.0",

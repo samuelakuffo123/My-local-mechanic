@@ -1,11 +1,13 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { config } from "./config.ts";
+import { resolve } from "node:path";
+import { config, isProduction } from "./config.ts";
 import { openDatabase, closeDatabase } from "./db.ts";
 import { createRequestHandler } from "./http.ts";
 import { authenticateToken } from "./auth.ts";
 import { registerRoutes } from "./routes.ts";
 import { bootstrapAdmin, seedDemoData } from "./seed.ts";
+import { createStaticHandler } from "./static.ts";
 
 function main() {
   openDatabase(config.databasePath);
@@ -14,9 +16,23 @@ function main() {
   if (config.seedDemoData) seedDemoData();
 
   const handler = createRequestHandler({ authenticate: authenticateToken });
+  // Same-origin hosting is on by default in production, and can be forced on or
+  // off locally with SERVE_CLIENT.
+  const serveClient = process.env.SERVE_CLIENT === "true" || (process.env.SERVE_CLIENT !== "false" && isProduction);
+  const clientDirectory = resolve(process.env.CLIENT_DIR ?? "dist");
+  const staticHandler = serveClient ? createStaticHandler(clientDirectory) : null;
+  if (serveClient) {
+    console.log(
+      staticHandler
+        ? `[api] serving client bundle from ${clientDirectory}`
+        : `[api] no client bundle at ${clientDirectory}; run "npm run build" before starting.`,
+    );
+  }
+
   // Belt and braces: the handler handles its own errors, but a rejection here
   // must never take the process down.
   const server = createServer((req, res) => {
+    if (staticHandler?.(req, res)) return;
     void Promise.resolve(handler(req, res)).catch((error) => {
       const existingId = res.getHeader("X-Request-Id");
       const requestId = typeof existingId === "string" ? existingId : randomUUID();
