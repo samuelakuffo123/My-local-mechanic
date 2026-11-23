@@ -21,7 +21,7 @@ const TowRoute = lazy(() => import("../features/tow/TowRoute").then((module) => 
 const TrackingRoute = lazy(() => import("../features/tracking/TrackingRoute").then((module) => ({ default: module.TrackingRoute })));
 const VehiclesRoute = lazy(() => import("../features/vehicles/VehiclesRoute").then((module) => ({ default: module.VehiclesRoute })));
 
-const pending = <div className="route-loading" role="status">Loading My Local Mechanic…</div>;
+const pending = <div className="route-loading" role="status">Loading MechNow…</div>;
 const load = (element: ReactNode) => <Suspense fallback={pending}>{element}</Suspense>;
 const driver = (element: ReactNode) => <RouteGuard allowed={["driver"]}>{load(element)}</RouteGuard>;
 

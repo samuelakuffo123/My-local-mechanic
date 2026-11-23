@@ -1,7 +1,7 @@
 export function BrandLogo({ compact = false }: { compact?: boolean }) {
   return (
     <span
-      aria-label="My Local Mechanic"
+      aria-label="MechNow"
       className={`brand-logo${compact ? " brand-logo--compact" : ""}`}
       role="img"
     >

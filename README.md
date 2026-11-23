@@ -1,6 +1,6 @@
-# My Local Mechanic
+# MechNow
 
-My Local Mechanic is a vehicle-care app for drivers in Ghana. The repository includes a React/Vite client and a Node.js HTTP API backed by SQLite.
+MechNow is a vehicle-care app for drivers in Ghana. The repository includes a React/Vite client and a Node.js HTTP API backed by SQLite.
 
 ## Run locally
 
