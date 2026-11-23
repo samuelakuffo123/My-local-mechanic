@@ -6,7 +6,8 @@ import { useAppStore } from "../../state/store";
 import { authService, type GoogleConfig } from "../../services/auth";
 import { preloadGoogleIdentity, requestGoogleAccessToken } from "../../services/googleIdentity";
 import { ApiError } from "../../services/mockApi";
-import type { Role } from "../../state/types";
+import { completeProfileSetup, needsProfileSetup } from "../onboarding/onboardingState";
+import type { Role, User } from "../../state/types";
 
 const ROLES: { value: Role; label: string }[] = [
   { value: "driver", label: "Vehicle owner" },
@@ -98,6 +99,22 @@ export function AuthPlaceholder() {
     }
   };
 
+  const finishSignIn = async (user: User) => {
+    await signIn(user);
+    const { activeVehicle } = useAppStore.getState();
+    const hasVehicle = Boolean(activeVehicle);
+
+    // Existing accounts with a car are already set up; don't send them back
+    // through onboarding just because they signed in before this flow existed.
+    if (user.role === "driver" && hasVehicle) completeProfileSetup(user.id);
+
+    if (user.role === "driver" && needsProfileSetup(user.id, hasVehicle)) {
+      navigate("/onboarding", { replace: true });
+      return;
+    }
+    navigate(homeFor(user.role), { replace: true });
+  };
+
   const requestCode = () =>
     run(async () => {
       const result = await authService.requestOtp(phone);
@@ -116,8 +133,7 @@ export function AuthPlaceholder() {
     run(async () => {
       const session = await authService.verifyOtp({ phone: otpPhone || phone, code: value, name: name || undefined, role });
       clearPendingOtp();
-      await signIn(session.user);
-      navigate(homeFor(session.user.role));
+      await finishSignIn(session.user);
     });
 
   const googleSignIn = () =>
@@ -131,8 +147,7 @@ export function AuthPlaceholder() {
         const accessToken = await requestGoogleAccessToken(googleConfig.clientId);
         const session = await authService.signInWithGoogle(accessToken, view === "signup" ? role : undefined);
         clearPendingOtp();
-        await signIn(session.user);
-        navigate(homeFor(session.user.role));
+        await finishSignIn(session.user);
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "";
         if (/cancelled|didn't complete|took too long|isn't configured|could not load|didn't return/i.test(message)) {

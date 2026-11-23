@@ -11,6 +11,7 @@ import carPhoto from "../../assets/corolla.jpg"
 import { vehicleService } from "../../services/vehicles"
 
 import { useAppStore } from "../../state/store"
+import { completeProfileSetup } from "./onboardingState"
 
 export function VehicleOnboarding() {
   const theme = useAppStore((state) => state.theme)
@@ -84,6 +85,7 @@ export function VehicleOnboarding() {
       })
 
       setVehicle(vehicle)
+      completeProfileSetup(user?.id)
 
       navigate("/app/home", { replace: true })
     } catch (cause) {
@@ -99,6 +101,7 @@ export function VehicleOnboarding() {
 
   function skip() {
     setVehicle(null)
+    completeProfileSetup(user?.id)
 
     navigate("/app/home", { replace: true })
   }

@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter, Navigate } from "react-router";
 import { RouteGuard } from "./RouteGuard";
-import { hasCompletedOnboarding } from "../features/onboarding/onboardingState";
+import { hasCompletedOnboarding, needsProfileSetup } from "../features/onboarding/onboardingState";
 import { useAppStore } from "../state/store";
 
 const AdminRoute = lazy(() => import("../features/admin/AdminRoute").then((module) => ({ default: module.AdminRoute })));
@@ -27,7 +27,9 @@ const driver = (element: ReactNode) => <RouteGuard allowed={["driver"]}>{load(el
 
 function AppEntry() {
   const authenticated = useAppStore((state) => state.authenticated);
+  const userId = useAppStore((state) => state.user?.id);
   const role = useAppStore((state) => state.user?.role);
+  const activeVehicle = useAppStore((state) => state.activeVehicle);
   const destination = !authenticated
     ? hasCompletedOnboarding()
       ? "/signup"
@@ -35,7 +37,9 @@ function AppEntry() {
     : role === "admin"
       ? "/admin"
       : role === "driver"
-        ? "/app/home"
+        ? needsProfileSetup(userId, Boolean(activeVehicle))
+          ? "/onboarding"
+          : "/app/home"
         : "/pro";
 
   return <Navigate replace to={destination} />;
