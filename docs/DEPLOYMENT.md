@@ -1,9 +1,10 @@
 # Deploying MechNow
 
-MechNow is a Vite/React client plus a long-running Node API with a SQLite
-database. The simplest permanent home is **one Render Web Service** that serves
-both the built client and `/api` from the same HTTPS origin. `render.yaml`
-already describes that service.
+MechNow is a Vite/React client plus a long-running Node API. In production the
+API uses **Neon Postgres** (`pg`, pooled connection for traffic, direct
+connection for migrations). One **Render free Web Service** serves the built
+client and `/api` from the same HTTPS origin, so no disk or paid plan is needed.
+`render.yaml` describes the service.
 
 ## Why one service
 
@@ -11,35 +12,76 @@ already describes that service.
   `VITE_API_URL`, CORS split or proxy configuration is needed.
 - The PWA manifest and service worker live at `/`, which only works when the
   client is served from the site root.
-- Render provides HTTPS, which the browser requires for service-worker install
-  and geolocation.
-- The SQLite file lives on a persistent disk, so data survives deploys.
+- Render provides HTTPS, which browsers require for service-worker install and
+  geolocation.
+- Neon provides the durable database, autoscaling and scale-to-zero on the free
+  tier. Writes still work after a Render cold start because data is not on the
+  web service's filesystem.
 
-The API must run on **Node 24+**. `node:sqlite` and direct `.ts` execution are
-not reliable on older runtimes. The repo pins `24.18.0` in `.node-version` and
+The API must run on **Node 24+** for direct `.ts` execution (and for the local
+`node:sqlite` test driver). The repo pins `24.18.0` in `.node-version` and
 `package.json`.
+
+## Database
+
+The API picks its driver at startup:
+
+| Condition | Driver |
+|---|---|
+| `DATABASE_URL` set | Postgres via `pg` (production) |
+| `DATABASE_PATH=":memory:"` or no `DATABASE_URL` | `node:sqlite` (tests/local) |
+
+Migrations are append-only and stored in `schema_migrations`. They run at boot
+over `DATABASE_URL_UNPOOLED` (falling back to `DATABASE_URL`), because PgBouncer
+transaction mode does not preserve session state. Application queries use the
+pooled URL. The repositories use portable `?` placeholders and the data layer
+rewrites them to `$1, $2, ...` for `pg`.
+
+Create a free Neon project, then copy both connection strings from **Connect →
+Connection string** (pooled and direct) into Render's `DATABASE_URL` and
+`DATABASE_URL_UNPOOLED`.
+
+### Neon services declared in `neon.ts`
+
+`neon.ts` is the branch policy applied by `neon deploy`. It declares:
+
+| Service | What was provisioned |
+|---|---|
+| Postgres | The `production` branch database (the app's only datastore today) |
+| Neon Auth | Managed Better Auth at `NEON_AUTH_BASE_URL` with JWKS at `NEON_AUTH_JWKS_URL` |
+| Functions | `hello` function at `https://<branch>-hello.<suffix>/` |
+| Object Storage | Private buckets `assets` and `uploads` |
+| AI Gateway | Branch-scoped endpoint and credential (needs credits to serve models) |
+| Realtime | `NEON_REALTIME_URL` and `NEON_REALTIME_SECRET` |
+
+`neon deploy` writes these values into `.env`. The app currently uses only
+Postgres; the other variables are declared in `render.yaml` so they are present
+in the deployed runtime and ready to wire in without another provisioning step.
+Neon Auth is **not** used for sign-in — MechNow keeps its own phone/OTP, Google
+and session system; enabling it does not change the app's auth flow.
 
 ## Deploy on Render
 
 1. Push the repository to GitHub (never commit `.env`).
 2. In Render, choose **New → Blueprint** and select the repo. Render reads
-   `render.yaml`.
+   `render.yaml` (free plan, no disk).
 3. Fill the `sync: false` secrets:
+   - `DATABASE_URL` and `DATABASE_URL_UNPOOLED` — Neon's pooled and direct URLs
    - `VITE_MAPBOX_ACCESS_TOKEN` — public `pk.` token
    - `GOOGLE_CLIENT_ID` — Google Web client ID
    - `ADMIN_PHONE`, `ADMIN_PASSWORD` — first admin (password 12+ characters)
    - `PAYSTACK_SECRET_KEY`, `PAYSTACK_WEBHOOK_SECRET` — only for live payments
-4. Apply the Blueprint. The first deploy runs `npm ci --include=dev && npm run build`, then
-   `npm start`. Dev dependencies are included explicitly because
+4. Apply the Blueprint. The first deploy runs `npm ci --include=dev && npm run build`,
+   then `npm start`. Dev dependencies are included explicitly because
    `NODE_ENV=production` is set during the build as well as at runtime.
 5. Open `https://<service>.onrender.com/api/health`. It should return
-   `{"ok":true,...}`.
+   `{"ok":true,...}`, and the server log should print
+   `[api] database driver: postgres`.
 6. Open the site root and install it from Chrome/Safari.
 
-The disk is mounted at `/var/data`, and `DATABASE_PATH` points at
-`/var/data/mechnow.sqlite`. Persistent disks require a paid instance; the
-Blueprint uses `starter`. Keep the service at **one instance** while it uses
-SQLite.
+Render's free instance sleeps after inactivity, so the first request can take
+about a minute. A free uptime monitor can ping `/api/health` every 10 minutes;
+that endpoint does not touch the database, so Neon can still scale to zero.
 
 ### Add the deployed origins
 
@@ -66,7 +108,8 @@ Add the same URL to Google's authorized origins and Mapbox's URL restrictions.
 | `NODE_ENV=production` | yes | Production behavior and secure defaults |
 | `API_HOST=0.0.0.0` | yes | Containers must listen on all interfaces |
 | `API_PORT` or `PORT` | yes | Render injects `PORT`; the API prefers `API_PORT` |
-| `DATABASE_PATH` | yes | SQLite file on the persistent disk |
+| `DATABASE_URL` | production | Neon **pooled** connection string |
+| `DATABASE_URL_UNPOOLED` | production | Neon **direct** connection string for migrations |
 | `PUBLIC_ORIGIN` | custom domains | Public HTTPS origin allowed by CORS |
 | `CORS_ORIGINS` | optional | Extra comma-separated origins |
 | `TRUST_PROXY=true` | behind a proxy | Trust `X-Forwarded-For` for rate limiting |
@@ -96,47 +139,65 @@ These fail loudly rather than pretending to work:
    providers through the provider application (which accepts `lat`, `lng` and
    `address`), or add a separate production-safe demo flag if you need a
    showcase.
-4. **Single instance.** SQLite on a disk does not support horizontal scaling.
-   Move to Postgres/Turso before adding replicas.
+4. **Avatars in Postgres.** Profile photos are stored as data URLs in
+   `users.avatar_data_url`. Neon's free tier includes 1 GB of storage; move
+   large uploads to object storage if avatars grow.
 
 ## Backups
 
-The disk protects data across deploys, not against mistakes. Take regular
-backups, for example from a Render shell or scheduled job:
+Neon keeps point-in-time restore (plan-dependent). You can also export with
+`pg_dump` using `DATABASE_URL_UNPOOLED`:
 
 ```sh
-sqlite3 /var/data/mechnow.sqlite ".backup '/var/data/mechnow-$(date +%F).sqlite'"
+pg_dump "$DATABASE_URL_UNPOOLED" > mechnow-backup.sql
 ```
 
-Download the copy off-platform, and test restoring it before you need it.
+Test restoring a copy before you need it.
 
-## Rehearse production locally
+## Verify locally
 
-PowerShell:
+SQLite suite (never touches Neon):
+
+```powershell
+npm run test:api
+```
+
+Production-style client + API against Neon:
 
 ```powershell
 npm ci
 npm run build
 $env:NODE_ENV = "production"
-$env:API_HOST = "127.0.0.1"
-$env:API_PORT = "8799"
-$env:DATABASE_PATH = "$env:TEMP\mechnow-prod.sqlite"
+$env:DATABASE_URL = "<neon pooled url>"
+$env:DATABASE_URL_UNPOOLED = "<neon direct url>"
 $env:ADMIN_PHONE = "+233200000000"
 $env:ADMIN_PASSWORD = "replace-with-12-plus-chars"
 npm start
 ```
 
-Open `http://127.0.0.1:8799`. The client is served from `dist/`, `/api` comes
-from the same process, and deep links such as `/app/track/<id>` return the SPA
-shell. Stop with `Ctrl+C` and delete the temporary database when finished.
+Open `http://127.0.0.1:10000` (or the `PORT` you set). `/api/health` comes from
+the same process, and deep links such as `/app/track/<id>` return the SPA shell.
+
+### Check the Neon services
+
+With the linked branch in `.neon`, these commands verify the provisioned
+services (they do not need app code):
+
+```powershell
+neon config status          # Auth/Realtime enabled, function and buckets listed
+neon neon-auth status       # Auth base URL and JWKS URL
+neon buckets list           # assets + uploads
+neon bucket object list assets/
+```
+
+The `hello` function URL printed by `neon deploy` should return
+`Hello from Neon Functions`. `NEON_AUTH_JWKS_URL` should return a JSON web key
+set. `NEON_AI_GATEWAY_BASE_URL/v1/models` responds with the model catalog but
+models are disabled until AI Gateway credits are purchased.
 
 ## Other hosts
 
-- **Railway:** same single-service setup; attach a volume at `/var/data`, set
-  the variables above, and let Railway provide `PORT`. The API also accepts
-  `RAILWAY_PUBLIC_DOMAIN` automatically for CORS.
-- **Fly.io / VPS:** use a Dockerfile or systemd unit, a volume or disk for
-  `/var/data`, Node 24, and a reverse proxy with TLS (Caddy or nginx).
+- **Railway / Fly.io / VPS:** same single-service setup; no volume is needed
+  because data is in Neon. Provide Node 24, the variables above, and TLS.
 - **Vercel / Netlify / Cloudflare Pages:** suitable only for the static client.
-  They do not provide a durable local disk for `node:sqlite`, so the API needs
-  a different host and a real database.
+  The API needs a long-running Node host and a real database.

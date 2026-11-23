@@ -1,40 +1,107 @@
-import { DatabaseSync } from "node:sqlite";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { Pool, type PoolClient } from "pg";
 import { config } from "./config.ts";
 
-// Data-access layer. Uses Node's built-in SQLite driver so the backend has no
-// native build step. The schema and query shapes are intentionally portable to
-// Postgres: swap this module for a pg-backed implementation of the same
-// `get/all/run/tx` helpers without touching domain code.
+// Data-access layer with two drivers behind one async interface:
+//
+//   * Postgres (`pg`) — used whenever DATABASE_URL is set. Neon's guidance is to
+//     run migrations over the direct/unpooled URL, because PgBouncer's
+//     transaction mode does not preserve session state.
+//   * SQLite (`node:sqlite`) — local development and the API tests, so the suite
+//     stays fast and can never touch a shared database.
+//
+// Domain code only depends on `all/get/run/tx`, so it stays driver-agnostic.
 
-let database: DatabaseSync | null = null;
+export type Row = Record<string, unknown>;
 
-export function db(): DatabaseSync {
-  if (!database) throw new Error("Database not initialised. Call openDatabase().");
-  return database;
+export interface QueryResult {
+  changes: number;
 }
 
-function applyPragmas(handle: DatabaseSync) {
-  handle.exec("PRAGMA journal_mode = WAL;");
-  handle.exec("PRAGMA foreign_keys = ON;");
-  handle.exec("PRAGMA busy_timeout = 5000;");
+export interface QueryExecutor {
+  all<T = Row>(sql: string, params: unknown[]): Promise<T[]>;
+  get<T = Row>(sql: string, params: unknown[]): Promise<T | undefined>;
+  run(sql: string, params: unknown[]): Promise<QueryResult>;
 }
 
-export function openDatabase(databasePath: string = config.databasePath): DatabaseSync {
-  if (databasePath !== ":memory:") {
-    mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
-  }
-  const handle = new DatabaseSync(databasePath);
-  applyPragmas(handle);
-  database = handle;
-  migrate(handle);
-  return handle;
+let executor: QueryExecutor | null = null;
+let pool: Pool | null = null;
+let sqlite: DatabaseSync | null = null;
+
+// Routes a query to the transaction's connection when one is open, so code
+// inside `tx()` does not have to thread a client parameter through.
+const transactionScope = new AsyncLocalStorage<QueryExecutor>();
+
+function requireExecutor(): QueryExecutor {
+  if (!executor) throw new Error("Database not initialised. Call openDatabase().");
+  return transactionScope.getStore() ?? executor;
 }
 
-export function closeDatabase() {
-  database?.close();
-  database = null;
+export function databaseDriver(): "postgres" | "sqlite" | null {
+  if (!executor) return null;
+  return pool ? "postgres" : "sqlite";
+}
+
+// ---------------------------------------------------------------------------
+// Drivers
+// ---------------------------------------------------------------------------
+
+function sqliteExecutor(handle: DatabaseSync): QueryExecutor {
+  return {
+    async all(sql, params) {
+      return handle.prepare(sql).all(...(params as never[])) as never;
+    },
+    async get(sql, params) {
+      return handle.prepare(sql).get(...(params as never[])) as never;
+    },
+    async run(sql, params) {
+      const result = handle.prepare(sql).run(...(params as never[]));
+      return { changes: Number(result.changes ?? 0) };
+    },
+  };
+}
+
+// pg uses numbered placeholders; the repositories are written in the portable
+// `?` style. No query in this codebase contains a `?` inside a string literal.
+function numberedPlaceholders(sql: string): string {
+  let index = 0;
+  return sql.replace(/\?/g, () => `$${++index}`);
+}
+
+function postgresExecutor(queryable: Pool | PoolClient): QueryExecutor {
+  return {
+    async all(sql, params) {
+      const result = await queryable.query(numberedPlaceholders(sql), params);
+      return result.rows as never;
+    },
+    async get(sql, params) {
+      const result = await queryable.query(numberedPlaceholders(sql), params);
+      return result.rows[0] as never;
+    },
+    async run(sql, params) {
+      const result = await queryable.query(numberedPlaceholders(sql), params);
+      return { changes: result.rowCount ?? 0 };
+    },
+  };
+}
+
+function createPool(connectionString: string, max: number): Pool {
+  const created = new Pool({
+    connectionString,
+    max,
+    connectionTimeoutMillis: 15_000,
+    idleTimeoutMillis: 30_000,
+    // A Neon compute that has scaled to zero takes a moment to wake; keep the
+    // first statement from timing out during that window.
+    statement_timeout: 30_000,
+  });
+  created.on("error", (error) => {
+    console.error("[db] idle client error:", error instanceof Error ? error.message : error);
+  });
+  return created;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +357,7 @@ const migrations: { version: number; name: string; sql: string }[] = [
   },
 ];
 
-function migrate(handle: DatabaseSync) {
+function migrateSqlite(handle: DatabaseSync) {
   const current = Number((handle.prepare("PRAGMA user_version").get() as { user_version: number }).user_version ?? 0);
   for (const migration of migrations) {
     if (migration.version <= current) continue;
@@ -306,29 +373,129 @@ function migrate(handle: DatabaseSync) {
   }
 }
 
+async function migratePostgres(connectionString: string) {
+  const migrator = createPool(connectionString, 1);
+  try {
+    await migrator.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      )
+    `);
+    const applied = await migrator.query<{ version: number }>("SELECT version FROM schema_migrations");
+    const done = new Set(applied.rows.map((row) => Number(row.version)));
+    for (const migration of migrations) {
+      if (done.has(migration.version)) continue;
+      // Statements are sent without parameters so multi-statement migrations
+      // run through the simple-query protocol.
+      await migrator.query("BEGIN");
+      try {
+        await migrator.query(migration.sql);
+        await migrator.query("INSERT INTO schema_migrations (version, name, applied_at) VALUES ($1, $2, $3)", [
+          migration.version,
+          migration.name,
+          new Date().toISOString(),
+        ]);
+        await migrator.query("COMMIT");
+      } catch (error) {
+        await migrator.query("ROLLBACK").catch(() => {});
+        throw error;
+      }
+    }
+  } finally {
+    await migrator.end().catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+/**
+ * Opens the database. An explicit path (including ":memory:") always means
+ * SQLite, which keeps tests hermetic. With no path, DATABASE_URL selects
+ * Postgres and anything else falls back to the local SQLite file.
+ */
+export async function openDatabase(databasePath?: string): Promise<void> {
+  if (executor) return;
+
+  if (databasePath === undefined && config.databaseUrl) {
+    const created = createPool(config.databaseUrl, 10);
+    await migratePostgres(config.databaseUrlUnpooled || config.databaseUrl);
+    pool = created;
+    executor = postgresExecutor(created);
+    return;
+  }
+
+  const target = databasePath ?? config.databasePath;
+  if (target !== ":memory:") {
+    mkdirSync(path.dirname(path.resolve(target)), { recursive: true });
+  }
+  const handle = new DatabaseSync(target);
+  handle.exec("PRAGMA journal_mode = WAL;");
+  handle.exec("PRAGMA foreign_keys = ON;");
+  handle.exec("PRAGMA busy_timeout = 5000;");
+  sqlite = handle;
+  executor = sqliteExecutor(handle);
+  migrateSqlite(handle);
+}
+
+export async function closeDatabase(): Promise<void> {
+  if (pool) {
+    await pool.end().catch(() => {});
+    pool = null;
+  }
+  sqlite?.close();
+  sqlite = null;
+  executor = null;
+}
+
 // ---------------------------------------------------------------------------
 // Tiny query helpers shared by all repositories.
 // ---------------------------------------------------------------------------
 
-type Row = Record<string, unknown>;
-
-export function all<T = Row>(sql: string, params: unknown[] = []): T[] {
-  return db().prepare(sql).all(...(params as never[])) as T[];
+export function all<T = Row>(sql: string, params: unknown[] = []): Promise<T[]> {
+  return requireExecutor().all<T>(sql, params);
 }
 
-export function get<T = Row>(sql: string, params: unknown[] = []): T | undefined {
-  return db().prepare(sql).get(...(params as never[])) as T | undefined;
+export function get<T = Row>(sql: string, params: unknown[] = []): Promise<T | undefined> {
+  return requireExecutor().get<T>(sql, params);
 }
 
-export function run(sql: string, params: unknown[] = []) {
-  return db().prepare(sql).run(...(params as never[]));
+export function run(sql: string, params: unknown[] = []): Promise<QueryResult> {
+  return requireExecutor().run(sql, params);
 }
 
-export function tx<T>(work: () => T): T {
-  const handle = db();
+/**
+ * Runs `work` in a transaction. Postgres takes a dedicated connection and
+ * routes the helpers through it with AsyncLocalStorage; SQLite serialises on
+ * its single handle. Nested calls join the outer transaction.
+ */
+export async function tx<T>(work: () => Promise<T> | T): Promise<T> {
+  if (!executor) throw new Error("Database not initialised. Call openDatabase().");
+  if (transactionScope.getStore()) return work();
+
+  if (pool) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await transactionScope.run(postgresExecutor(client), async () => work());
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  const handle = sqlite;
+  if (!handle) throw new Error("Database not initialised. Call openDatabase().");
   handle.exec("BEGIN");
   try {
-    const result = work();
+    const result = await work();
     handle.exec("COMMIT");
     return result;
   } catch (error) {

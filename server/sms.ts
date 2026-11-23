@@ -26,11 +26,11 @@ function consoleAdapter(message: SmsMessage, devCode?: string): SmsResult {
 
 export async function sendOtp(phone: string, code: string): Promise<SmsResult> {
   const body = `${config.smsSenderId}: your verification code is ${code}. It expires in ${config.otpTtlMinutes} minutes. Never share this code.`;
-  return send({ to: phone, body }, code);
+  return await send({ to: phone, body }, code);
 }
 
 export async function sendSms(message: SmsMessage): Promise<SmsResult> {
-  return send(message);
+  return await send(message);
 }
 
 async function send(message: SmsMessage, devCode?: string): Promise<SmsResult> {

@@ -13,24 +13,24 @@ interface EnsureUserInput {
   password: string;
 }
 
-export function ensureUser(input: EnsureUserInput) {
+export async function ensureUser(input: EnsureUserInput) {
   const phone = normalisePhone(input.phone);
   if (!phone) throw new Error(`Invalid phone for seed user: ${input.phone}`);
-  let user = get<{ id: string }>("SELECT id FROM users WHERE phone = ?", [phone]);
+  let user = await get<{ id: string }>("SELECT id FROM users WHERE phone = ?", [phone]);
   if (!user) {
     const id = newId();
     const timestamp = nowIso();
-    run(
+    await run(
       `INSERT INTO users (id, role, name, phone, email, status, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 'active', ?, ?)`,
       [id, input.role, input.name, phone, timestamp, timestamp],
     );
     user = { id };
   }
-  setPassword(user.id, input.password);
+  await setPassword(user.id, input.password);
   return user.id;
 }
 
-export function bootstrapAdmin() {
+export async function bootstrapAdmin() {
   const phone = process.env.ADMIN_PHONE;
   const password = process.env.ADMIN_PASSWORD;
   if (!phone || !password) {
@@ -40,24 +40,24 @@ export function bootstrapAdmin() {
   if (isProduction && password.length < 12) {
     throw new Error("ADMIN_PASSWORD must be at least 12 characters in production.");
   }
-  const id = ensureUser({ phone, name: process.env.ADMIN_NAME ?? "MechNow Admin", role: "admin", password });
+  const id = await ensureUser({ phone, name: process.env.ADMIN_NAME ?? "MechNow Admin", role: "admin", password });
   console.log(`[seed] admin ready for ${phone}`);
   return id;
 }
 
-export function seedDemoData() {
+export async function seedDemoData() {
   if (isProduction) throw new Error("Refusing to seed demo data in production.");
-  const driverId = ensureUser({ phone: "0200000001", name: "Ama Driver", role: "driver", password: "driver-demo-123" });
-  const mechanicId = ensureUser({ phone: "0200000002", name: "Kofi Mechanic", role: "mechanic", password: "mechanic-demo-123" });
-  const towId = ensureUser({ phone: "0200000003", name: "Yaw Towing", role: "tow", password: "tow-demo-123" });
-  const mechanicTwoId = ensureUser({ phone: "0200000004", name: "Nii Mensah", role: "mechanic", password: "mechanic-demo-123" });
-  const towTwoId = ensureUser({ phone: "0200000005", name: "Adjoa Owusu", role: "tow", password: "tow-demo-123" });
-  const vendorOneId = ensureUser({ phone: "0200000006", name: "Accra Parts Hub", role: "vendor", password: "vendor-demo-123" });
-  const vendorTwoId = ensureUser({ phone: "0200000007", name: "Spintex Spares", role: "vendor", password: "vendor-demo-123" });
+  const driverId = await ensureUser({ phone: "0200000001", name: "Ama Driver", role: "driver", password: "driver-demo-123" });
+  const mechanicId = await ensureUser({ phone: "0200000002", name: "Kofi Mechanic", role: "mechanic", password: "mechanic-demo-123" });
+  const towId = await ensureUser({ phone: "0200000003", name: "Yaw Towing", role: "tow", password: "tow-demo-123" });
+  const mechanicTwoId = await ensureUser({ phone: "0200000004", name: "Nii Mensah", role: "mechanic", password: "mechanic-demo-123" });
+  const towTwoId = await ensureUser({ phone: "0200000005", name: "Adjoa Owusu", role: "tow", password: "tow-demo-123" });
+  const vendorOneId = await ensureUser({ phone: "0200000006", name: "Accra Parts Hub", role: "vendor", password: "vendor-demo-123" });
+  const vendorTwoId = await ensureUser({ phone: "0200000007", name: "Spintex Spares", role: "vendor", password: "vendor-demo-123" });
 
-  if (!get("SELECT id FROM vehicles WHERE owner_id = ?", [driverId])) {
+  if (!await get("SELECT id FROM vehicles WHERE owner_id = ?", [driverId])) {
     const timestamp = nowIso();
-    run(
+    await run(
       `INSERT INTO vehicles (id, owner_id, make, model, year, plate, mileage_km, is_primary, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       [newId(), driverId, "Toyota", "Corolla", 2015, "GT-1234-18", 128000, timestamp, timestamp],
@@ -140,12 +140,12 @@ export function seedDemoData() {
     },
   ];
 
-  const ensureProvider = (provider: DemoProvider) => {
-    const existing = get<{ id: string }>("SELECT id FROM providers WHERE user_id = ?", [provider.userId]);
+  const ensureProvider = async (provider: DemoProvider) => {
+    const existing = await get<{ id: string }>("SELECT id FROM providers WHERE user_id = ?", [provider.userId]);
     const timestamp = nowIso();
     if (!existing) {
       const id = newId();
-      run(
+      await run(
         `INSERT INTO providers (id, user_id, type, business_name, region, service_areas, specialisations, status, available, rating, reliability, lat, lng, address, verified_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'verified', 1, 0, 0, ?, ?, ?, ?, ?, ?)`,
         [
@@ -164,7 +164,7 @@ export function seedDemoData() {
           timestamp,
         ],
       );
-      run(
+      await run(
         `INSERT INTO provider_credentials (id, provider_id, document_type, document_ref, status, verified_at, created_at)
          VALUES (?, ?, 'business_registration', ?, 'valid', ?, ?)`,
         [newId(), id, `DEMO-${provider.type.toUpperCase()}-0001`, timestamp, timestamp],
@@ -172,7 +172,7 @@ export function seedDemoData() {
       return id;
     }
     // Keep the demo directory useful on databases seeded before map support.
-    run(
+    await run(
       `UPDATE providers SET business_name = ?, region = ?, specialisations = ?, lat = ?, lng = ?, address = ?, status = 'verified', available = 1, updated_at = ? WHERE id = ?`,
       [
         provider.businessName,
@@ -193,12 +193,12 @@ export function seedDemoData() {
   console.log("[seed] demo data ready. Logins: 0200000001 / driver-demo-123 (driver), 0200000002 / mechanic-demo-123 (mechanic)");
 }
 
-export function databaseSummary() {
-  const count = (table: string) => Number(get<{ c: number }>(`SELECT COUNT(*) as c FROM ${table}`)?.c ?? 0);
+export async function databaseSummary() {
+  const count = async (table: string) => Number(await (await get<{ c: number }>(`SELECT COUNT(*) as "c" FROM ${table}`))?.c ?? 0);
   return {
-    users: count("users"),
-    providers: all("SELECT id FROM providers").length,
-    requests: count("service_requests"),
+    users: await count("users"),
+    providers: await (await all("SELECT id FROM providers")).length,
+    requests: await count("service_requests"),
   };
 }
 

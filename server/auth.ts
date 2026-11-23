@@ -55,7 +55,7 @@ export async function requestOtp(rawPhone: string, ip: string): Promise<{ devCod
 
   const code = String(randomInt(100000, 999999));
   const expiresAt = addMinutes(new Date(), config.otpTtlMinutes).toISOString();
-  run(
+  await run(
     `INSERT INTO otp_codes (id, phone, code_hash, attempts, expires_at, consumed_at, created_at) VALUES (?, ?, ?, 0, ?, NULL, ?)`,
     [newId(), phone, otpHash(phone, code), expiresAt, nowIso()],
   );
@@ -65,13 +65,13 @@ export async function requestOtp(rawPhone: string, ip: string): Promise<{ devCod
   return { devCode, expiresAt };
 }
 
-export function verifyOtp(rawPhone: string, code: string, options: { name?: string; role?: Role } = {}) {
+export async function verifyOtp(rawPhone: string, code: string, options: { name?: string; role?: Role } = {}) {
   if (!isValidPhone(rawPhone)) throw badRequest(PHONE_ERROR, { field: "phone" });
   if (!/^\d{6}$/.test(code)) throw badRequest(CODE_ERROR, { field: "code" });
   const phone = normalisePhone(rawPhone);
   if (!rateLimit(`verify:phone:${phone}`, 10, 15 * 60_000)) throw tooMany();
 
-  const record = get<{ id: string; code_hash: string; attempts: number; expires_at: string; consumed_at: string | null }>(
+  const record = await get<{ id: string; code_hash: string; attempts: number; expires_at: string; consumed_at: string | null }>(
     `SELECT id, code_hash, attempts, expires_at, consumed_at FROM otp_codes
      WHERE phone = ? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
     [phone],
@@ -81,35 +81,35 @@ export function verifyOtp(rawPhone: string, code: string, options: { name?: stri
   if (new Date(record.expires_at).getTime() <= Date.now()) throw badRequest("That code has expired. Request a new one.");
   if (record.attempts >= config.otpMaxAttempts) throw tooMany("Too many incorrect attempts. Request a new code.");
   if (!safeEqual(record.code_hash, otpHash(phone, code))) {
-    run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
+    await run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
     throw badRequest("That code is incorrect.");
   }
 
   const role: Role = options.role && SELF_SERVE_ROLES.includes(options.role) ? options.role : "driver";
-  const issued = tx(() => {
-    run("UPDATE otp_codes SET consumed_at = ? WHERE id = ?", [nowIso(), record.id]);
-    let user = get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE phone = ?`, [phone]);
+  const issued = await tx(async () => {
+    await run("UPDATE otp_codes SET consumed_at = ? WHERE id = ?", [nowIso(), record.id]);
+    let user = await get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE phone = ?`, [phone]);
     if (!user) {
       const id = newId();
       const timestamp = nowIso();
-      run(
+      await run(
         `INSERT INTO users (id, role, name, phone, email, status, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 'active', ?, ?)`,
         [id, role, options.name?.trim() || "New customer", phone, timestamp, timestamp],
       );
-      user = get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [id]);
+      user = await get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [id]);
     }
     if (!user) throw new Error("Failed to provision user.");
     if (user.status !== "active") throw forbidden("This account is not active.");
 
     const token = randomToken(32);
-    run(
+    await run(
       `INSERT INTO sessions (token_hash, user_id, created_at, expires_at, revoked_at, user_agent) VALUES (?, ?, ?, ?, NULL, NULL)`,
       [sha256(token), user.id, nowIso(), addHours(new Date(), config.sessionTtlHours).toISOString()],
     );
     return { token, user };
   });
 
-  auditFrom({ userId: issued.user.id, role: issued.user.role, name: issued.user.name }, "auth.login", "user", issued.user.id);
+  await auditFrom({ userId: issued.user.id, role: issued.user.role, name: issued.user.name }, "auth.login", "user", issued.user.id);
   return sessionPayload(issued.token, issued.user);
 }
 
@@ -199,23 +199,23 @@ export async function signInWithGoogle(accessToken: string, options: { role?: Ro
   const identity = await verifyGoogleAccessToken(accessToken);
   const role: Role = options.role && SELF_SERVE_ROLES.includes(options.role) ? options.role : "driver";
 
-  const user = tx(() => {
+  const user = await tx(async () => {
     const columns = USER_COLUMNS;
-    const link = get<{ user_id: string }>(
+    const link = await get<{ user_id: string }>(
       "SELECT user_id FROM oauth_accounts WHERE provider = 'google' AND provider_subject = ?",
       [identity.subject],
     );
 
-    let existing = link ? get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [link.user_id]) : undefined;
+    let existing = link ? await get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [link.user_id]) : undefined;
     if (!existing) {
-      existing = get<UserRow>(`SELECT ${columns} FROM users WHERE lower(email) = ? AND status != 'deleted'`, [identity.email]);
+      existing = await get<UserRow>(`SELECT ${columns} FROM users WHERE lower(email) = ? AND status != 'deleted'`, [identity.email]);
     }
 
     if (existing) {
       if (existing.status !== "active") throw forbidden("This account is not active.");
       if (!existing.email) {
-        run("UPDATE users SET email = ?, updated_at = ? WHERE id = ?", [identity.email, nowIso(), existing.id]);
-        existing = get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [existing.id]);
+        await run("UPDATE users SET email = ?, updated_at = ? WHERE id = ?", [identity.email, nowIso(), existing.id]);
+        existing = await get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [existing.id]);
       }
     } else {
       const id = newId();
@@ -223,17 +223,17 @@ export async function signInWithGoogle(accessToken: string, options: { role?: Ro
       // `users.phone` is NOT NULL UNIQUE. Google-only accounts get a stable,
       // non-dialable sentinel derived from the immutable Google subject.
       const phone = `google:${sha256(`mechnow-google:${identity.subject}`).slice(0, 24)}`;
-      run(
+      await run(
         `INSERT INTO users (id, role, name, phone, email, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
         [id, role, identity.name, phone, identity.email, timestamp, timestamp],
       );
-      existing = get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [id]);
+      existing = await get<UserRow>(`SELECT ${columns} FROM users WHERE id = ?`, [id]);
     }
 
     if (!existing) throw new Error("Failed to provision Google user.");
     const timestamp = nowIso();
-    run(
+    await run(
       `INSERT INTO oauth_accounts (provider, provider_subject, user_id, email, created_at, updated_at)
        VALUES ('google', ?, ?, ?, ?, ?)
        ON CONFLICT(provider, provider_subject) DO UPDATE SET
@@ -243,8 +243,8 @@ export async function signInWithGoogle(accessToken: string, options: { role?: Ro
     return existing;
   });
 
-  const session = createSession(user.id);
-  auditFrom(
+  const session = await createSession(user.id);
+  await auditFrom(
     { userId: user.id, role: user.role, name: user.name },
     "auth.login.google",
     "user",
@@ -254,8 +254,8 @@ export async function signInWithGoogle(accessToken: string, options: { role?: Ro
   return session;
 }
 
-export function authenticateToken(token: string): AuthContext | null {
-  const row = get<{ user_id: string; role: Role; name: string; expires_at: string; revoked_at: string | null; status: string }>(
+export async function authenticateToken(token: string): Promise<AuthContext | null> {
+  const row = await get<{ user_id: string; role: Role; name: string; expires_at: string; revoked_at: string | null; status: string }>(
     `SELECT s.user_id, u.role, u.name, s.expires_at, s.revoked_at, u.status
      FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`,
     [sha256(token)],
@@ -267,8 +267,8 @@ export function authenticateToken(token: string): AuthContext | null {
   return { userId: row.user_id, role: row.role, name: row.name };
 }
 
-export function logout(token: string) {
-  run("UPDATE sessions SET revoked_at = ? WHERE token_hash = ?", [nowIso(), sha256(token)]);
+export async function logout(token: string) {
+  await run("UPDATE sessions SET revoked_at = ? WHERE token_hash = ?", [nowIso(), sha256(token)]);
 }
 
 export function requireRole(auth: AuthContext | null, roles: Role[]): AuthContext {
@@ -277,8 +277,8 @@ export function requireRole(auth: AuthContext | null, roles: Role[]): AuthContex
   return auth;
 }
 
-export function getUser(userId: string) {
-  return get<{
+export async function getUser(userId: string) {
+  return await get<{
     id: string;
     role: Role;
     name: string;
@@ -288,22 +288,22 @@ export function getUser(userId: string) {
     status: string;
     createdAt: string;
   }>(
-    `SELECT id, role, name, phone, email, avatar_data_url as avatarUrl, status, created_at as createdAt FROM users WHERE id = ?`,
+    `SELECT id, role, name, phone, email, avatar_data_url as "avatarUrl", status, created_at as "createdAt" FROM users WHERE id = ?`,
     [userId],
   );
 }
 
-export function setPassword(userId: string, password: string) {
+export async function setPassword(userId: string, password: string) {
   const { hash, salt } = hashPassword(password);
-  run(
+  await run(
     `INSERT INTO auth_credentials (user_id, password_hash, password_salt, updated_at) VALUES (?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET password_hash = excluded.password_hash, password_salt = excluded.password_salt, updated_at = excluded.updated_at`,
     [userId, hash, salt, nowIso()],
   );
 }
 
-export function checkPassword(phone: string, password: string) {
-  const row = get<{ user_id: string; password_hash: string; password_salt: string }>(
+export async function checkPassword(phone: string, password: string) {
+  const row = await get<{ user_id: string; password_hash: string; password_salt: string }>(
     `SELECT c.user_id, c.password_hash, c.password_salt FROM auth_credentials c JOIN users u ON u.id = c.user_id WHERE u.phone = ?`,
     [normalisePhone(phone)],
   );
@@ -316,12 +316,12 @@ export function checkPassword(phone: string, password: string) {
   return row.user_id;
 }
 
-export function hasPassword(userId: string) {
-  return Boolean(get<{ user_id: string }>("SELECT user_id FROM auth_credentials WHERE user_id = ?", [userId]));
+export async function hasPassword(userId: string) {
+  return Boolean(await get<{ user_id: string }>("SELECT user_id FROM auth_credentials WHERE user_id = ?", [userId]));
 }
 
-export function checkPasswordById(userId: string, password: string) {
-  const row = get<{ password_hash: string; password_salt: string }>(
+export async function checkPasswordById(userId: string, password: string) {
+  const row = await get<{ password_hash: string; password_salt: string }>(
     "SELECT password_hash, password_salt FROM auth_credentials WHERE user_id = ?",
     [userId],
   );
@@ -329,25 +329,25 @@ export function checkPasswordById(userId: string, password: string) {
   return verifyPassword(password, row.password_salt, row.password_hash);
 }
 
-export function createSession(userId: string) {
-  const user = get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [userId]);
+export async function createSession(userId: string) {
+  const user = await get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [userId]);
   if (!user) throw unauthorized();
   if (user.status !== "active") throw forbidden("This account is not active.");
   const token = randomToken(32);
-  run(
+  await run(
     `INSERT INTO sessions (token_hash, user_id, created_at, expires_at, revoked_at, user_agent) VALUES (?, ?, ?, ?, NULL, NULL)`,
     [sha256(token), user.id, nowIso(), addHours(new Date(), config.sessionTtlHours).toISOString()],
   );
-  auditFrom({ userId: user.id, role: user.role, name: user.name }, "auth.login", "user", user.id);
+  await auditFrom({ userId: user.id, role: user.role, name: user.name }, "auth.login", "user", user.id);
   return sessionPayload(token, user);
 }
 
-export function listUsers(role?: Role) {
+export async function listUsers(role?: Role) {
   // Keep bulk admin responses lean: avatars are only returned for the user's own session.
   const columns = "id, role, name, phone, email, status";
   const rows = role
-    ? all<Omit<UserRow, "avatarDataUrl">>(`SELECT ${columns} FROM users WHERE role = ? ORDER BY created_at DESC`, [role])
-    : all<Omit<UserRow, "avatarDataUrl">>(`SELECT ${columns} FROM users ORDER BY created_at DESC`);
+    ? await all<Omit<UserRow, "avatarDataUrl">>(`SELECT ${columns} FROM users WHERE role = ? ORDER BY created_at DESC`, [role])
+    : await all<Omit<UserRow, "avatarDataUrl">>(`SELECT ${columns} FROM users ORDER BY created_at DESC`);
   return rows;
 }
 

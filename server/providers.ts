@@ -48,11 +48,11 @@ function hydrate(row: Record<string, unknown>): ProviderProfile {
   };
 }
 
-const SELECT = `SELECT id, user_id as userId, type, business_name as businessName, region,
-  service_areas as serviceAreas, specialisations, status, available, rating, reliability,
+const SELECT = `SELECT id, user_id as "userId", type, business_name as "businessName", region,
+  service_areas as "serviceAreas", specialisations, status, available, rating, reliability,
   lat, lng, address FROM providers`;
 
-export function applyAsProvider(auth: AuthContext, input: {
+export async function applyAsProvider(auth: AuthContext, input: {
   businessName: string;
   type: ProviderType;
   region?: string;
@@ -72,11 +72,11 @@ export function applyAsProvider(auth: AuthContext, input: {
   if (input.lng != null && (!Number.isFinite(input.lng) || input.lng < -180 || input.lng > 180)) {
     throw badRequest("Longitude must be a number between -180 and 180.");
   }
-  const existing = get<Record<string, unknown>>(`${SELECT} WHERE user_id = ?`, [auth.userId]);
+  const existing = await get<Record<string, unknown>>(`${SELECT} WHERE user_id = ?`, [auth.userId]);
   if (existing) {
     // Idempotent: update the application instead of duplicating it.
     const current = hydrate(existing);
-    run(
+    await run(
       `UPDATE providers SET business_name = ?, type = ?, region = ?, service_areas = ?, lat = ?, lng = ?, address = ?, updated_at = ? WHERE user_id = ?`,
       [
         input.businessName.trim(),
@@ -90,11 +90,11 @@ export function applyAsProvider(auth: AuthContext, input: {
         auth.userId,
       ],
     );
-    return hydrate(get<Record<string, unknown>>(`${SELECT} WHERE user_id = ?`, [auth.userId])!);
+    return hydrate((await get<Record<string, unknown>>(`${SELECT} WHERE user_id = ?`, [auth.userId]))!);
   }
   const id = newId();
   const timestamp = nowIso();
-  run(
+  await run(
     `INSERT INTO providers (id, user_id, type, business_name, region, service_areas, specialisations, status, available, rating, reliability, lat, lng, address, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, '[]', 'pending', 0, 0, 0, ?, ?, ?, ?, ?)`,
     [
@@ -111,35 +111,35 @@ export function applyAsProvider(auth: AuthContext, input: {
       timestamp,
     ],
   );
-  auditFrom(auth, "provider.apply", "provider", id);
-  return hydrate(get<Record<string, unknown>>(`${SELECT} WHERE id = ?`, [id])!);
+  await auditFrom(auth, "provider.apply", "provider", id);
+  return hydrate((await get<Record<string, unknown>>(`${SELECT} WHERE id = ?`, [id]))!);
 }
 
-export function getProviderById(id: string) {
-  const row = get<Record<string, unknown>>(`${SELECT} WHERE id = ?`, [id]);
+export async function getProviderById(id: string) {
+  const row = await get<Record<string, unknown>>(`${SELECT} WHERE id = ?`, [id]);
   return row ? hydrate(row) : null;
 }
 
-export function getProviderForUser(userId: string) {
-  const row = get<Record<string, unknown>>(`${SELECT} WHERE user_id = ?`, [userId]);
+export async function getProviderForUser(userId: string) {
+  const row = await get<Record<string, unknown>>(`${SELECT} WHERE user_id = ?`, [userId]);
   return row ? hydrate(row) : null;
 }
 
-export function setAvailability(auth: AuthContext, available: boolean) {
-  const provider = getProviderForUser(auth.userId);
+export async function setAvailability(auth: AuthContext, available: boolean) {
+  const provider = await getProviderForUser(auth.userId);
   if (!provider) throw notFound("You do not have a provider profile.");
   if (provider.status !== "verified") throw forbidden("Your provider account is not verified yet.");
-  run("UPDATE providers SET available = ?, updated_at = ? WHERE id = ?", [available ? 1 : 0, nowIso(), provider.id]);
+  await run("UPDATE providers SET available = ?, updated_at = ? WHERE id = ?", [available ? 1 : 0, nowIso(), provider.id]);
   return { ...provider, available };
 }
 
 /** Eligible providers for dispatch: verified, available, matching kind, in-region when supplied. */
-export function eligibleProviders(kind: "emergency" | "booking" | "tow", region?: string | null) {
+export async function eligibleProviders(kind: "emergency" | "booking" | "tow", region?: string | null) {
   const wanted: ProviderType = kind === "tow" ? "tow" : "mechanic";
-  let rows = all<Record<string, unknown>>(
+  let rows = (await all<Record<string, unknown>>(
     `${SELECT} WHERE status = 'verified' AND available = 1 AND type = ? ORDER BY reliability DESC, rating DESC`,
     [wanted],
-  ).map(hydrate);
+  )).map(hydrate);
   if (region) {
     const inRegion = rows.filter((row) => !row.region || row.region.toLowerCase() === region.toLowerCase());
     if (inRegion.length > 0) rows = inRegion;
@@ -164,16 +164,16 @@ function distanceKm(from: { lat: number; lng: number }, to: { lat: number; lng: 
  * marker always corresponds to a real location. Availability affects ordering
  * but not inclusion, because a shop or garage can still be visited while busy.
  */
-export function nearbyProviders(input: {
+export async function nearbyProviders(input: {
   lat?: number | null;
   lng?: number | null;
   radiusKm?: number;
   type?: ProviderType | null;
-}): NearbyProvider[] {
-  const rows = all<Record<string, unknown>>(
+}): Promise<NearbyProvider[]> {
+  const rows = (await all<Record<string, unknown>>(
     `${SELECT} WHERE status = 'verified'${input.type ? " AND type = ?" : ""}`,
     input.type ? [input.type] : [],
-  ).map(hydrate);
+  )).map(hydrate);
 
   const origin = typeof input.lat === "number" && typeof input.lng === "number" && Number.isFinite(input.lat) && Number.isFinite(input.lng)
     ? { lat: input.lat, lng: input.lng }
@@ -201,19 +201,19 @@ export function nearbyProviders(input: {
     .slice(0, 40);
 }
 
-export function providerCredentials(providerId: string) {
-  return all(
-    `SELECT id, provider_id as providerId, document_type as documentType, document_ref as documentRef,
-            expires_at as expiresAt, status, verified_at as verifiedAt, created_at as createdAt
+export async function providerCredentials(providerId: string) {
+  return await all(
+    `SELECT id, provider_id as "providerId", document_type as "documentType", document_ref as "documentRef",
+            expires_at as "expiresAt", status, verified_at as "verifiedAt", created_at as "createdAt"
      FROM provider_credentials WHERE provider_id = ? ORDER BY created_at DESC`,
     [providerId],
   );
 }
 
-export function addCredential(providerId: string, input: { documentType: string; documentRef: string; expiresAt?: string | null }) {
+export async function addCredential(providerId: string, input: { documentType: string; documentRef: string; expiresAt?: string | null }) {
   if (!input.documentType?.trim() || !input.documentRef?.trim()) throw badRequest("Document type and reference are required.");
   const id = newId();
-  run(
+  await run(
     `INSERT INTO provider_credentials (id, provider_id, document_type, document_ref, expires_at, status, verified_at, created_at)
      VALUES (?, ?, ?, ?, ?, 'pending', NULL, ?)`,
     [id, providerId, input.documentType.trim(), input.documentRef.trim(), input.expiresAt ?? null, nowIso()],
@@ -221,34 +221,34 @@ export function addCredential(providerId: string, input: { documentType: string;
   return { id };
 }
 
-export function listProvidersByStatus(status: ProviderStatus) {
-  return all<Record<string, unknown>>(`${SELECT} WHERE status = ? ORDER BY created_at ASC`, [status]).map(hydrate);
+export async function listProvidersByStatus(status: ProviderStatus) {
+  return (await all<Record<string, unknown>>(`${SELECT} WHERE status = ? ORDER BY created_at ASC`, [status])).map(hydrate);
 }
 
-export function verifyProvider(admin: AuthContext, providerId: string, decision: "verify" | "reject" | "suspend", note?: string) {
-  const provider = getProviderById(providerId);
+export async function verifyProvider(admin: AuthContext, providerId: string, decision: "verify" | "reject" | "suspend", note?: string) {
+  const provider = await getProviderById(providerId);
   if (!provider) throw notFound("Provider not found.");
-  if (decision === "verify" && providerCredentials(providerId).length === 0) {
+  if (decision === "verify" && (await providerCredentials(providerId)).length === 0) {
     throw conflict("Add at least one credential (identity/business document) before verifying this provider.");
   }
   const status: ProviderStatus = decision === "verify" ? "verified" : decision === "reject" ? "rejected" : "suspended";
-  run(
+  await run(
     `UPDATE providers SET status = ?, verification_note = ?, verified_at = ?, verified_by = ?, updated_at = ? WHERE id = ?`,
     [status, note ?? null, decision === "verify" ? nowIso() : null, admin.userId, nowIso(), providerId],
   );
-  run(
+  await run(
     `UPDATE provider_credentials SET status = ?, verified_at = ? WHERE provider_id = ? AND status = 'pending'`,
     [decision === "verify" ? "valid" : "rejected", decision === "verify" ? nowIso() : null, providerId],
   );
-  auditFrom(admin, `provider.${decision}`, "provider", providerId, { note });
+  await auditFrom(admin, `provider.${decision}`, "provider", providerId, { note });
   return { ...provider, status };
 }
 
-export function expiringCredentials(withinDays = 30) {
+export async function expiringCredentials(withinDays = 30) {
   const threshold = new Date(Date.now() + withinDays * 86_400_000).toISOString();
-  return all(
-    `SELECT c.id, c.provider_id as providerId, p.business_name as businessName, c.document_type as documentType,
-            c.expires_at as expiresAt, c.status
+  return await all(
+    `SELECT c.id, c.provider_id as "providerId", p.business_name as "businessName", c.document_type as "documentType",
+            c.expires_at as "expiresAt", c.status
      FROM provider_credentials c JOIN providers p ON p.id = c.provider_id
      WHERE c.expires_at IS NOT NULL AND c.expires_at <= ? AND c.status = 'valid'
      ORDER BY c.expires_at ASC`,
@@ -256,18 +256,18 @@ export function expiringCredentials(withinDays = 30) {
   );
 }
 
-export function suspendExpiredProviders() {
-  const expired = expiringCredentials(0);
-  return tx(() => {
+export async function suspendExpiredProviders() {
+  const expired = await expiringCredentials(0);
+  return await tx(async () => {
     for (const row of expired) {
-      run("UPDATE providers SET available = 0, updated_at = ? WHERE id = ?", [nowIso(), row.providerId]);
+      await run("UPDATE providers SET available = 0, updated_at = ? WHERE id = ?", [nowIso(), row.providerId]);
     }
     return expired.length;
   });
 }
 
-export function assertVerified(auth: AuthContext) {
-  const provider = getProviderForUser(auth.userId);
+export async function assertVerified(auth: AuthContext) {
+  const provider = await getProviderForUser(auth.userId);
   if (!provider) throw forbidden("Create a provider profile first.");
   if (provider.status !== "verified") throw conflict("Your provider account is not verified.");
   return provider;

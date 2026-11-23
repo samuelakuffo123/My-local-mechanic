@@ -17,8 +17,8 @@ test("static handler serves the SPA shell, assets and API fallthrough", async ()
   const handler = createStaticHandler(directory);
   assert.ok(handler, "handler should exist when dist/index.html is present");
 
-  const server = createServer((req, res) => {
-    if (!handler(req, res)) {
+  const server = createServer(async (req, res) => {
+    if (!await handler(req, res)) {
       res.statusCode = 404;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: "api" }));

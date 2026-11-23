@@ -19,3 +19,7 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+.neon
+# Neon CLI installs these agent skills/tooling files locally; regenerate with `neon init`.
+/.agents/
+skills-lock.json

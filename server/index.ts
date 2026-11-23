@@ -2,18 +2,21 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { config, isProduction } from "./config.ts";
-import { openDatabase, closeDatabase } from "./db.ts";
+import { openDatabase, closeDatabase, databaseDriver } from "./db.ts";
 import { createRequestHandler } from "./http.ts";
 import { authenticateToken } from "./auth.ts";
 import { registerRoutes } from "./routes.ts";
 import { bootstrapAdmin, seedDemoData } from "./seed.ts";
 import { createStaticHandler } from "./static.ts";
 
-function main() {
-  openDatabase(config.databasePath);
+async function main() {
+  // With no explicit path, DATABASE_URL selects Postgres and anything else
+  // falls back to the local SQLite file.
+  await openDatabase();
+  console.log(`[api] database driver: ${databaseDriver()}`);
   registerRoutes();
-  bootstrapAdmin();
-  if (config.seedDemoData) seedDemoData();
+  await bootstrapAdmin();
+  if (config.seedDemoData) await seedDemoData();
 
   const handler = createRequestHandler({ authenticate: authenticateToken });
   // Same-origin hosting is on by default in production, and can be forced on or
@@ -31,9 +34,9 @@ function main() {
 
   // Belt and braces: the handler handles its own errors, but a rejection here
   // must never take the process down.
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     if (staticHandler?.(req, res)) return;
-    void Promise.resolve(handler(req, res)).catch((error) => {
+    void Promise.resolve(await handler(req, res)).catch((error) => {
       const existingId = res.getHeader("X-Request-Id");
       const requestId = typeof existingId === "string" ? existingId : randomUUID();
       if (!existingId) res.setHeader("X-Request-Id", requestId);
@@ -61,8 +64,8 @@ function main() {
 
   const shutdown = () => {
     console.log("[api] shutting down");
-    server.close(() => {
-      closeDatabase();
+    server.close(async () => {
+      await closeDatabase();
       process.exit(0);
     });
     setTimeout(() => process.exit(0), 5000).unref();
@@ -71,9 +74,7 @@ function main() {
   process.on("SIGTERM", shutdown);
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error: unknown) => {
   console.error("[api] failed to start", error);
   process.exit(1);
-}
+});
