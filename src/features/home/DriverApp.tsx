@@ -69,6 +69,7 @@ import { LiveMap } from "../../components/LiveMap";
 import { useGeolocation, type GeoPoint } from "../../hooks/useGeolocation";
 import { useNearbyProviders } from "../../hooks/useNearbyProviders";
 import { getDrivingRoute } from "../../services/directions";
+import { errorMessage } from "../../services/errorMessage";
 
 // The emergency walkthrough is a scripted UI state machine. As it progresses we
 // mirror the meaningful stages onto a persisted service request so the job is
@@ -709,7 +710,7 @@ function ProfilePanelSheet({
       setAvatarDraft(await prepareProfileImage(file));
       setFeedback({ tone: "success", message: "Photo ready. Save changes to keep it on your profile." });
     } catch (error) {
-      setFeedback({ tone: "error", message: error instanceof Error ? error.message : "We couldn't use that photo." });
+      setFeedback({ tone: "error", message: errorMessage(error, "We couldn't use that photo. Choose a smaller JPG, PNG or WebP image.") });
     } finally {
       setProcessingPhoto(false);
     }
@@ -731,7 +732,7 @@ function ProfilePanelSheet({
       setAvatarDraft(undefined);
       setFeedback({ tone: "success", message: "Your profile and photo have been saved." });
     } catch (error) {
-      setFeedback({ tone: "error", message: error instanceof Error ? error.message : "We couldn't save your profile." });
+      setFeedback({ tone: "error", message: errorMessage(error, "We couldn't save your profile. Check your connection and try again.") });
     } finally {
       setSaving(false);
     }
@@ -1722,7 +1723,7 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       }
     } catch (error) {
       console.error(error);
-      setTrackingError(error instanceof Error ? error.message : "Could not sync request.");
+      setTrackingError(errorMessage(error, "We couldn't update live tracking. We'll keep trying."));
     }
   };
 
@@ -1758,7 +1759,7 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
         const fresh = await requestService.get(id);
         if (!cancelled) setLiveRequest(fresh);
       } catch (error) {
-        if (!cancelled) setTrackingError(error instanceof Error ? error.message : "Could not refresh tracking.");
+        if (!cancelled) setTrackingError(errorMessage(error, "We couldn't refresh live tracking. We'll keep trying."));
       }
     };
     void tick();
@@ -1875,7 +1876,7 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       case "results": return <ProviderResults onBack={() => setScreen("location")} onSelect={() => advanceEmergency(["confirming"], "confirm")} />;
       case "confirm": return <ConfirmScreen onBack={() => setScreen("results")} onConfirm={() => advanceEmergency(["requested"], "sent")} problem={selectedProblem} locationLabel={(requestLocation ?? geo.point)?.label ?? "Current location"} vehicle={vehicle} />;
       case "sent": return <SentScreen onContinue={() => advanceEmergency(["matched", "enRoute"], "tracking")} />;
-      case "tracking": return <TrackingScreen onArrived={() => advanceEmergency(["nearby", "arrived"], "arrived")} onScenario={(s) => { if (s === "cancelled") { void cancelActiveRequest(); } else { setScenario(s); } }} request={liveRequest} userLocation={requestLocation ?? geo.point} providerLocation={providerPoint} route={routeCoords} error={trackingError} onRefresh={() => { const id = backendRequestId.current; if (id) void requestService.get(id).then(setLiveRequest).catch((e) => setTrackingError(e instanceof Error ? e.message : "Could not refresh tracking.")); }} />;
+      case "tracking": return <TrackingScreen onArrived={() => advanceEmergency(["nearby", "arrived"], "arrived")} onScenario={(s) => { if (s === "cancelled") { void cancelActiveRequest(); } else { setScenario(s); } }} request={liveRequest} userLocation={requestLocation ?? geo.point} providerLocation={providerPoint} route={routeCoords} error={trackingError} onRefresh={() => { const id = backendRequestId.current; if (id) void requestService.get(id).then(setLiveRequest).catch((e) => setTrackingError(errorMessage(e, "We couldn't refresh live tracking. We'll keep trying."))); }} />;
       case "arrived": return <ArrivedScreen onEstimate={() => advanceEmergency(["diagnosing", "awaitingApproval"], "estimate")} />;
       case "estimate": return <EstimateScreen onApprove={() => advanceEmergency(["repairing", "completed", "paying"], "payment")} onBack={() => setScreen("arrived")} />;
       case "payment": return <PaymentScreen onPaid={() => advanceEmergency(["paid"], "rating")} />;

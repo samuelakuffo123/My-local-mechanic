@@ -34,6 +34,7 @@ import { bookingService } from "../../services/booking";
 import { towService } from "../../services/tow";
 import { vehicleService, type ServiceHistoryItem } from "../../services/vehicles";
 import type { NearbyProvider, ServiceRequest, Vehicle } from "../../services/apiTypes";
+import { errorMessage } from "../../services/errorMessage";
 import { LiveMap } from "../../components/LiveMap";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { useNearbyProviders } from "../../hooks/useNearbyProviders";
@@ -454,7 +455,7 @@ function Booking({
       onCreated({ service, vehicle: vehicleLabel(vehicle), when: slot, ref: (created as ServiceRequest | undefined)?.ref });
       go("booking-confirmed");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the booking.");
+      setError(errorMessage(err, "We couldn't submit your booking. Check your connection and try again."));
     } finally {
       setSubmitting(false);
     }
@@ -660,7 +661,7 @@ function Vehicles({
       setForm({ make: "", model: "", year: String(today.getFullYear()), plate: "", mileageKm: "" });
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the vehicle.");
+      setError(errorMessage(err, "We couldn't save your vehicle. Check the details and try again."));
     } finally {
       setSaving(false);
     }
@@ -931,7 +932,7 @@ function TowEstimate({
       });
       go("tow-submitted");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not submit the tow request.");
+      setError(errorMessage(err, "We couldn't submit your tow request. Check your connection and try again."));
     } finally {
       setSubmitting(false);
     }

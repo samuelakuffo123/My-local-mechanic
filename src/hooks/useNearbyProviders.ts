@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { providerService } from "../services/providers";
 import type { NearbyProvider } from "../services/apiTypes";
+import { errorMessage } from "../services/errorMessage";
 
 interface NearbyState {
   items: NearbyProvider[];
@@ -28,7 +29,7 @@ export function useNearbyProviders(origin: { lat: number; lng: number } | null) 
       })
       .catch((cause: unknown) => {
         if (active) {
-          setState({ items: [], loading: false, error: cause instanceof Error ? cause.message : "Couldn't load nearby providers." });
+          setState({ items: [], loading: false, error: errorMessage(cause, "We couldn't load nearby providers. Check your connection and try again.") });
         }
       });
     return () => {

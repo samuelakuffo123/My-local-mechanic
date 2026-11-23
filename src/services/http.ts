@@ -40,6 +40,7 @@ export interface RequestOptions {
 interface ErrorPayload {
   code?: unknown;
   message?: unknown;
+  details?: unknown;
   requestId?: unknown;
 }
 
@@ -112,7 +113,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     const code = typeof errorPayload?.code === "string" ? errorPayload.code : undefined;
     const requestId = typeof errorPayload?.requestId === "string" ? errorPayload.requestId : undefined;
     if (response.status >= 500 && requestId) console.error(`[api] ${response.status} ${path} reference=${requestId}`);
-    throw new ApiError(fallbackMessage(response.status, path, serverMessage), response.status, code, requestId);
+    throw new ApiError(fallbackMessage(response.status, path, serverMessage), response.status, code, requestId, errorPayload?.details);
   }
 
   return payload as T;

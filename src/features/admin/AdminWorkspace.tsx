@@ -1,6 +1,7 @@
 import "../provider/provider.css";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
+  AlertCircle,
   ArrowRight,
   BadgeCheck,
   Banknote,
@@ -8,45 +9,17 @@ import {
   CheckCircle2,
   Clock3,
   History,
+  LoaderCircle,
   ShieldCheck,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { Skeleton, SkeletonRegion } from "../../components/Skeleton";
 import { adminService, type AuditLogEntry } from "../../services/admin";
 import { providerService } from "../../services/providers";
 import type { PlatformMetrics, ProviderProfile } from "../../services/apiTypes";
-
-interface AsyncState<T> {
-  data: T;
-  loading: boolean;
-  error: string | null;
-}
-
-function useAsync<T>(load: () => Promise<T>, initial: T, deps: unknown[]): AsyncState<T> {
-  const [state, setState] = useState<AsyncState<T>>({ data: initial, loading: true, error: null });
-  const run = useCallback(load, deps);
-  useEffect(() => {
-    let active = true;
-    setState((current) => ({ ...current, loading: true, error: null }));
-    run()
-      .then((data) => {
-        if (active) setState({ data, loading: false, error: null });
-      })
-      .catch((error: unknown) => {
-        if (active) {
-          setState((current) => ({
-            ...current,
-            loading: false,
-            error: error instanceof Error ? error.message : "Something went wrong.",
-          }));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [run]);
-  return state;
-}
+import { useRemote } from "../../hooks/useRemote";
+import { errorMessage } from "../../services/errorMessage";
 
 function DButton({
   children,
@@ -54,18 +27,41 @@ function DButton({
   variant = "primary",
   onClick,
   disabled,
+  busy,
+  busyLabel,
 }: {
   children: React.ReactNode;
   icon?: LucideIcon;
   variant?: "primary" | "secondary" | "ghost" | "danger" | "success";
   onClick?: () => void;
   disabled?: boolean;
+  busy?: boolean;
+  busyLabel?: string;
 }) {
   return (
-    <button className={`d-button d-button--${variant}`} disabled={disabled} onClick={onClick} type="button">
-      {Icon && <Icon size={17} strokeWidth={1.75} />}
-      <span>{children}</span>
+    <button aria-busy={busy} className={`d-button d-button--${variant}`} disabled={disabled || busy} onClick={onClick} type="button">
+      {busy ? <LoaderCircle className="ui-spin" size={15} /> : Icon ? <Icon size={17} strokeWidth={1.75} /> : null}
+      <span>{busy ? busyLabel ?? children : children}</span>
     </button>
+  );
+}
+
+function DError({
+  message,
+  onRetry,
+  onDismiss,
+}: {
+  message: string;
+  onRetry?: () => void;
+  onDismiss?: () => void;
+}) {
+  return (
+    <p className="d-error-note" role="alert">
+      <AlertCircle size={15} />
+      <span>{message}</span>
+      {onRetry && <button onClick={onRetry} type="button">Try again</button>}
+      {onDismiss && <button onClick={onDismiss} type="button">Dismiss</button>}
+    </p>
   );
 }
 
@@ -90,6 +86,59 @@ function Metric({
   );
 }
 
+function AdminMetricSkeleton() {
+  return (
+    <div className="d-metric-grid" aria-hidden="true">
+      {[0, 1, 2, 3].map((item) => (
+        <article className="d-metric" key={item}>
+          <Skeleton className="d-skeleton-icon" />
+          <div className="d-skeleton-copy">
+            <Skeleton className="d-skeleton-line d-skeleton-line--label" />
+            <Skeleton className="d-skeleton-line d-skeleton-line--value" />
+            <Skeleton className="d-skeleton-line d-skeleton-line--detail" />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ApplicantSkeleton() {
+  return (
+    <>
+      {[0, 1].map((item) => (
+        <div className="d-applicant d-skeleton-applicant" key={item} aria-hidden="true">
+          <Skeleton className="d-skeleton-avatar" />
+          <div className="d-skeleton-copy">
+            <Skeleton className="d-skeleton-line d-skeleton-line--heading" />
+            <Skeleton className="d-skeleton-line d-skeleton-line--detail" />
+            <Skeleton className="d-skeleton-line d-skeleton-line--meta" />
+          </div>
+          <div className="d-review-actions">
+            <Skeleton className="d-skeleton-button" />
+            <Skeleton className="d-skeleton-button" />
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function AuditSkeleton() {
+  return (
+    <div className="d-audit-skeleton" aria-hidden="true">
+      {[0, 1, 2, 3, 4].map((item) => (
+        <div className="d-audit-skeleton-row" key={item}>
+          <Skeleton className="d-skeleton-icon d-skeleton-icon--small" />
+          <Skeleton className="d-skeleton-line d-skeleton-line--detail" />
+          <Skeleton className="d-skeleton-line d-skeleton-line--meta" />
+          <Skeleton className="d-skeleton-line d-skeleton-line--meta" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function formatMoney(value: number) {
   return `GHS ${value.toLocaleString("en-GH", { maximumFractionDigits: 0 })}`;
 }
@@ -103,22 +152,34 @@ function formatTime(value: string) {
 }
 
 export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
-  const [reloadKey, setReloadKey] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const metrics = useAsync<PlatformMetrics | null>(() => adminService.metrics(), null, [reloadKey]);
-  const pending = useAsync<ProviderProfile[]>(() => providerService.adminList("pending"), [], [reloadKey]);
-  const audit = useAsync<AuditLogEntry[]>(() => adminService.audit(5), [], [reloadKey]);
+  const metrics = useRemote<PlatformMetrics | null>(() => adminService.metrics(), null, [], {
+    fallback: "We couldn't load platform metrics. Check your connection and try again.",
+  });
+  const pending = useRemote<ProviderProfile[]>(() => providerService.adminList("pending"), [], [], {
+    fallback: "We couldn't load provider applications. Check your connection and try again.",
+  });
+  const audit = useRemote<AuditLogEntry[]>(() => adminService.audit(5), [], [], {
+    fallback: "We couldn't load the audit log. Check your connection and try again.",
+  });
   const m = metrics.data;
+  const refreshAll = useCallback(() => {
+    metrics.reload();
+    pending.reload();
+    audit.reload();
+  }, [audit, metrics, pending]);
+  const refreshing = metrics.refreshing || pending.refreshing || audit.refreshing;
 
   const verify = async (id: string, decision: "verify" | "reject") => {
-    setBusy(id);
+    const key = `verify-${id}-${decision}`;
+    setBusy(key);
     setError(null);
     try {
       await providerService.verify(id, decision);
-      setReloadKey((value) => value + 1);
+      refreshAll();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not update the provider.");
+      setError(errorMessage(cause, "We couldn't update that application. Refresh and try again."));
     } finally {
       setBusy(null);
     }
@@ -134,8 +195,8 @@ export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
             <p>Trust, safety, payments, and marketplace health.</p>
           </div>
           <div className="d-heading-actions">
-            <button type="button" onClick={() => setReloadKey((value) => value + 1)}>
-              <History size={16} /> Refresh
+            <button aria-busy={refreshing} disabled={refreshing} type="button" onClick={refreshAll}>
+              <History className={refreshing ? "ui-spin" : ""} size={16} /> {refreshing ? "Refreshing…" : "Refresh"}
             </button>
             <button aria-label="Sign out" className="d-exit" onClick={onExit} type="button">
               <ShieldCheck size={17} /> Sign out
@@ -143,35 +204,61 @@ export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
           </div>
         </div>
         <div className="d-admin-alert">
-          <ShieldCheck size={19} />
+          {pending.error ? <AlertCircle size={19} /> : <ShieldCheck size={19} />}
           <span>
-            <strong>{pending.data.length} provider application{pending.data.length === 1 ? "" : "s"} need review</strong>
-            <small>Verification decisions are recorded in the audit trail.</small>
+            <strong>
+              {pending.loading
+                ? "Checking provider applications…"
+                : pending.error
+                  ? "Provider applications unavailable"
+                  : `${pending.data.length} provider application${pending.data.length === 1 ? "" : "s"} need review`}
+            </strong>
+            <small>
+              {pending.loading
+                ? "Loading the verification queue."
+                : pending.error
+                  ? pending.error
+                  : "Verification decisions are recorded in the audit trail."}
+            </small>
           </span>
-          <a href="#provider-verification">Open queue <ArrowRight size={15} /></a>
+          {!pending.loading && !pending.error && <a href="#provider-verification">Open queue <ArrowRight size={15} /></a>}
         </div>
-        <div className="d-metric-grid">
-          <Metric detail="Registered accounts" icon={Users} label="Users" value={m ? m.users.toLocaleString("en-GH") : "—"} />
-          <Metric detail={`${m?.providers.pending ?? 0} pending review`} icon={BadgeCheck} label="Verified providers" tone="green" value={m ? m.providers.verified.toLocaleString("en-GH") : "—"} />
-          <Metric detail={`${m?.requests.open ?? 0} open`} icon={Clock3} label="Service requests" tone="violet" value={m ? String(m.requests.total) : "—"} />
-          <Metric detail={`${m?.payments.paidCount ?? 0} paid`} icon={Banknote} label="Verified payments" tone="amber" value={m ? formatMoney(m.payments.paidValueGhs) : "—"} />
-        </div>
-        {metrics.error && <p role="alert">{metrics.error}</p>}
+        {metrics.loading ? (
+          <SkeletonRegion label="Loading platform metrics"><AdminMetricSkeleton /></SkeletonRegion>
+        ) : metrics.error && !m ? (
+          <DError message={metrics.error} onRetry={metrics.reload} />
+        ) : (
+          <>
+            {metrics.error && <DError message={metrics.error} onRetry={metrics.reload} />}
+            <div aria-busy={metrics.refreshing} className="d-metric-grid">
+              <Metric detail="Registered accounts" icon={Users} label="Users" value={m ? m.users.toLocaleString("en-GH") : "—"} />
+              <Metric detail={`${m?.providers.pending ?? 0} pending review`} icon={BadgeCheck} label="Verified providers" tone="green" value={m ? m.providers.verified.toLocaleString("en-GH") : "—"} />
+              <Metric detail={`${m?.requests.open ?? 0} open`} icon={Clock3} label="Service requests" tone="violet" value={m ? String(m.requests.total) : "—"} />
+              <Metric detail={`${m?.payments.paidCount ?? 0} paid`} icon={Banknote} label="Verified payments" tone="amber" value={m ? formatMoney(m.payments.paidValueGhs) : "—"} />
+            </div>
+          </>
+        )}
         <div className="d-admin-grid">
           <section className="d-verification" id="provider-verification">
             <div className="d-card-title">
               <div><span>PROVIDER VERIFICATION</span><h3>Application review</h3></div>
-              <span className={`d-status ${pending.data.length ? "d-status-warning" : "d-status-repairing"}`}>
-                <i />{pending.data.length ? "Needs review" : "Clear"}
-              </span>
+              {pending.loading ? (
+                <Skeleton className="d-skeleton-status" />
+              ) : pending.error ? (
+                <span className="d-status d-status-error"><i />Unavailable</span>
+              ) : (
+                <span className={`d-status ${pending.data.length ? "d-status-warning" : "d-status-repairing"}`}>
+                  <i />{pending.data.length ? "Needs review" : "Clear"}
+                </span>
+              )}
             </div>
-            {error && <p role="alert">{error}</p>}
-            {pending.loading && <p className="d-state-note" aria-live="polite">Loading applications…</p>}
-            {pending.error && <p role="alert">{pending.error}</p>}
+            {error && <DError message={error} onDismiss={() => setError(null)} />}
+            {pending.loading && <SkeletonRegion label="Loading provider applications"><ApplicantSkeleton /></SkeletonRegion>}
+            {pending.error && <DError message={pending.error} onRetry={pending.reload} />}
             {!pending.loading && !pending.error && pending.data.length === 0 && (
               <p className="d-state-note">No provider applications are awaiting review.</p>
             )}
-            {pending.data.map((provider) => (
+            {!pending.loading && !pending.error && pending.data.map((provider) => (
               <div className="d-applicant" key={provider.id}>
                 <span>{provider.type.slice(0, 2).toUpperCase()}</span>
                 <div>
@@ -180,8 +267,25 @@ export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
                   <small>{provider.serviceAreas.join(", ") || "No service areas listed"}</small>
                 </div>
                 <div className="d-review-actions">
-                  <DButton disabled={busy === provider.id} icon={Check} onClick={() => void verify(provider.id, "verify")} variant="success">Approve</DButton>
-                  <DButton disabled={busy === provider.id} onClick={() => void verify(provider.id, "reject")} variant="danger">Reject</DButton>
+                  <DButton
+                    busy={busy === `verify-${provider.id}-verify`}
+                    busyLabel="Approving…"
+                    disabled={busy !== null}
+                    icon={Check}
+                    onClick={() => void verify(provider.id, "verify")}
+                    variant="success"
+                  >
+                    Approve
+                  </DButton>
+                  <DButton
+                    busy={busy === `verify-${provider.id}-reject`}
+                    busyLabel="Rejecting…"
+                    disabled={busy !== null}
+                    onClick={() => void verify(provider.id, "reject")}
+                    variant="danger"
+                  >
+                    Reject
+                  </DButton>
                 </div>
               </div>
             ))}
@@ -189,23 +293,38 @@ export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
           </section>
           <section className="d-ops-metrics">
             <div className="d-card-title"><div><span>TRUST & OPERATIONS</span><h3>Platform totals</h3></div></div>
-            {[
-              ["Service requests", m ? String(m.requests.total) : "—"],
-              ["Open requests", m ? String(m.requests.open) : "—"],
-              ["Completed", m ? String(m.requests.completed) : "—"],
-              ["Cancelled", m ? String(m.requests.cancelled) : "—"],
-              ["Open disputes", m ? String(m.disputes.open) : "—"],
-            ].map(([label, value]) => (
-              <div className="d-op-metric" key={label}><span>{label}</span><strong>{value}</strong></div>
-            ))}
+            {metrics.loading ? (
+              <SkeletonRegion label="Loading platform totals">
+                <div aria-hidden="true">
+                  {[0, 1, 2, 3, 4].map((item) => (
+                    <div className="d-op-metric" key={item}>
+                      <Skeleton className="d-skeleton-line d-skeleton-line--detail" />
+                      <Skeleton className="d-skeleton-line d-skeleton-line--meta" />
+                    </div>
+                  ))}
+                </div>
+              </SkeletonRegion>
+            ) : metrics.error ? (
+              <p className="d-state-note">Platform totals are unavailable. Try refreshing the page.</p>
+            ) : (
+              [
+                ["Service requests", m ? String(m.requests.total) : "—"],
+                ["Open requests", m ? String(m.requests.open) : "—"],
+                ["Completed", m ? String(m.requests.completed) : "—"],
+                ["Cancelled", m ? String(m.requests.cancelled) : "—"],
+                ["Open disputes", m ? String(m.disputes.open) : "—"],
+              ].map(([label, value]) => (
+                <div className="d-op-metric" key={label}><span>{label}</span><strong>{value}</strong></div>
+              ))
+            )}
           </section>
         </div>
         <section className="d-audit">
           <div className="d-card-title"><div><span>AUDIT LOG</span><h3>Recent sensitive actions</h3></div></div>
-          {audit.loading && <p className="d-state-note" aria-live="polite">Loading audit entries…</p>}
-          {audit.error && <p role="alert">{audit.error}</p>}
+          {audit.loading && <SkeletonRegion label="Loading audit entries"><AuditSkeleton /></SkeletonRegion>}
+          {audit.error && <DError message={audit.error} onRetry={audit.reload} />}
           {!audit.loading && !audit.error && audit.data.length === 0 && <p className="d-state-note">No audit entries yet.</p>}
-          {audit.data.map((entry) => (
+          {!audit.loading && !audit.error && audit.data.map((entry) => (
             <div key={entry.id}>
               <span><History size={16} /></span>
               <strong>{entry.action.replace(/_/g, " ")}</strong>

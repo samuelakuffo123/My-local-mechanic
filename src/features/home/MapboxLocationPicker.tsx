@@ -104,7 +104,7 @@ export default function MapboxLocationPicker({
     selectCoordinatesRef.current = selectCoordinates;
     map.on("click", (event) => selectCoordinates(event.lngLat.lng, event.lngLat.lat));
     map.on("error", () => {
-      setSearchError("The map couldn’t load. Check the Mapbox token and your internet connection.");
+      setSearchError("The map couldn't load. Check your connection and try again.");
     });
     return () => {
       reverseController?.abort();
@@ -152,7 +152,7 @@ export default function MapboxLocationPicker({
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setSuggestions([]);
-        setSearchError(error instanceof Error ? error.message : "Address search is unavailable. Try placing the pin on the map.");
+        setSearchError("Address search is unavailable. Try again or place the pin on the map.");
       } finally {
         if (!controller.signal.aborted) setSearching(false);
       }
@@ -219,8 +219,8 @@ export default function MapboxLocationPicker({
       ) : (
         <div className="mapbox-map-placeholder" role="status">
           <MapPin size={22} />
-          <strong>Interactive map setup needed</strong>
-          <span>{configuredToken ? "Use a public Mapbox token that starts with pk. The map won’t use secret tokens." : "Add a public Mapbox token to enable map selection and address search. You can still enter a landmark or use GPS."}</span>
+          <strong>Live map selection unavailable</strong>
+          <span>You can still enter a landmark or use GPS to set your pickup point.</span>
         </div>
       )}
       {searchError && <p className="location-error" role="alert">{searchError}</p>}

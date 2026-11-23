@@ -1,0 +1,44 @@
+.ui-skeleton {
+  position: relative;
+  display: block;
+  flex: none;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+
+.ui-skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+  transform: translateX(-100%);
+  animation: ui-skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes ui-skeleton-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.ui-spin {
+  animation: ui-spin 900ms linear infinite;
+}
+
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton::after {
+    animation: none;
+    opacity: 0.4;
+  }
+
+  .ui-spin {
+    animation-duration: 2s;
+  }
+}

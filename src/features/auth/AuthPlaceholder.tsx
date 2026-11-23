@@ -5,7 +5,7 @@ import { DeviceFrame } from "../../components/DeviceFrame";
 import { useAppStore } from "../../state/store";
 import { authService, type GoogleConfig } from "../../services/auth";
 import { preloadGoogleIdentity, requestGoogleAccessToken } from "../../services/googleIdentity";
-import { ApiError } from "../../services/mockApi";
+import { errorMessage } from "../../services/errorMessage";
 import { completeProfileSetup, needsProfileSetup } from "../onboarding/onboardingState";
 import type { Role, User } from "../../state/types";
 
@@ -93,7 +93,7 @@ export function AuthPlaceholder() {
     try {
       await work();
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Something went wrong. Please try again.");
+      setError(errorMessage(caught, "We couldn't continue. Check your details and try again."));
     } finally {
       setBusy(false);
     }
@@ -149,7 +149,7 @@ export function AuthPlaceholder() {
         clearPendingOtp();
         await finishSignIn(session.user);
       } catch (caught) {
-        const message = caught instanceof Error ? caught.message : "";
+        const message = errorMessage(caught, "Google sign-in didn't complete. Try again or use your phone number.");
         if (/cancelled|didn't complete|took too long|isn't configured|could not load|didn't return/i.test(message)) {
           setGoogleNotice(message);
           return;

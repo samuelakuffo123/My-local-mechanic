@@ -9,6 +9,7 @@ import { BrandLogo } from "../../components/BrandLogo"
 import carPhoto from "../../assets/corolla.jpg"
 
 import { vehicleService } from "../../services/vehicles"
+import { errorMessage } from "../../services/errorMessage"
 
 import { useAppStore } from "../../state/store"
 import { completeProfileSetup } from "./onboardingState"
@@ -89,11 +90,7 @@ export function VehicleOnboarding() {
 
       navigate("/app/home", { replace: true })
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "We couldn't save your vehicle.",
-      )
+      setError(errorMessage(cause, "We couldn't save your vehicle. Check the details and try again."))
     } finally {
       setSaving(false)
     }

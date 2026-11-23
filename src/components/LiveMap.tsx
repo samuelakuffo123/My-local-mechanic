@@ -306,7 +306,7 @@ export function LiveMap({
       <div className={`live-map live-map--empty ${className}`} style={{ height }}>
         <div className="live-map__fallback">
           <strong>Map unavailable</strong>
-          <small>Add <code>VITE_MAPBOX_ACCESS_TOKEN</code> to enable live maps.</small>
+          <small>Live maps aren't available right now. You can still view location details.</small>
         </div>
       </div>
     );

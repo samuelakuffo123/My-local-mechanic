@@ -156,7 +156,7 @@
 }
 .pw-online:hover:not(:disabled) { border-color: var(--brand); }
 .pw-online__dot { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); }
-.pw-online__dot i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); transition: background var(--motion-tooltip), box-shadow var(--motion-tooltip); }
+.pw-online__dot i { width: 9px; height: 9px; display: grid; place-items: center; border-radius: 50%; background: var(--muted); transition: background var(--motion-tooltip), box-shadow var(--motion-tooltip); }
 .pw-online.is-on { border-color: rgba(8, 122, 72, .3); background: linear-gradient(135deg, rgba(8, 122, 72, .08), var(--surface-1)); }
 .pw-online.is-on .pw-online__dot { background: rgba(8, 122, 72, .12); }
 .pw-online.is-on .pw-online__dot i { background: var(--success); box-shadow: 0 0 0 5px rgba(8, 122, 72, .12); }
@@ -334,6 +334,28 @@
 .pw-empty--error { border-color: var(--error-border); background: var(--error-bg); color: var(--error-text); }
 .pw-empty--error strong { color: var(--error-text); }
 .pw-empty .pw-button { margin-top: 6px; min-height: 40px; }
+
+.pw-root .ui-skeleton { background: var(--surface-3); }
+.pw-skeleton-stack { display: flex; flex-direction: column; gap: 8px; }
+.pw-skeleton-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.pw-skeleton-line { width: 100%; height: 9px; }
+.pw-skeleton-line--label { width: 46%; height: 8px; }
+.pw-skeleton-line--heading { width: 68%; height: 12px; }
+.pw-skeleton-line--value { width: 56%; height: 18px; }
+.pw-skeleton-line--detail { width: 82%; height: 8px; }
+.pw-skeleton-line--meta { width: 38%; height: 8px; }
+.pw-skeleton-title { width: 150px; max-width: 100%; height: 16px; }
+.pw-skeleton-icon { width: 30px; height: 30px; border-radius: 10px; }
+.pw-skeleton-icon--lg { width: 40px; height: 40px; border-radius: 14px; }
+.pw-skeleton-pill { width: 60px; height: 22px; border-radius: 99px; }
+.pw-skeleton-button { width: 100%; height: 44px; border-radius: 14px; }
+.pw-skeleton-button--quiet { width: 76px; }
+.pw-skeleton-block { width: 100%; height: 70px; border-radius: 15px; }
+.pw-skeleton-card,
+.pw-skeleton-panel { animation: none; box-shadow: none; }
+.pw-skeleton-job { cursor: default; }
+.pw-skeleton-activity { min-height: 60px; }
+.pw-inline-busy { display: inline-flex; align-items: center; gap: 5px; }
 
 .pw-detail,
 .pw-panel,

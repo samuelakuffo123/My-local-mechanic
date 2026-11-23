@@ -55,6 +55,10 @@ services:
       # Public Mapbox token, needed at build time. Restrict it to this domain.
       - key: VITE_MAPBOX_ACCESS_TOKEN
         sync: false
+      # Production must surface real backend failures instead of falling back
+      # to local mock data when the API returns 502/503/504.
+      - key: VITE_API_MODE
+        value: server
       # Google Identity Services web client ID.
       - key: GOOGLE_CLIENT_ID
         sync: false

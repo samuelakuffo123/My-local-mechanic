@@ -114,6 +114,7 @@ Add the same URL to Google's authorized origins and Mapbox's URL restrictions.
 | `CORS_ORIGINS` | optional | Extra comma-separated origins |
 | `TRUST_PROXY=true` | behind a proxy | Trust `X-Forwarded-For` for rate limiting |
 | `VITE_MAPBOX_ACCESS_TOKEN` | build time | Public Mapbox token |
+| `VITE_API_MODE=server` | production build | Surface real backend failures instead of local mock fallbacks |
 | `GOOGLE_CLIENT_ID` | yes for Google sign-in | Web client ID |
 | `ADMIN_PHONE` / `ADMIN_PASSWORD` | first boot | Admin bootstrap (12+ chars) |
 | `PAYMENTS_PROVIDER=paystack` | live payments | Enables the Paystack adapter |

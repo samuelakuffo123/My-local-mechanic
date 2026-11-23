@@ -6,6 +6,7 @@ import { bookingService } from "../../services/booking";
 import { emergencyService } from "../../services/emergency";
 import { paymentService, type Payment } from "../../services/payments";
 import type { RequestStatus } from "../../services/apiTypes";
+import { errorMessage } from "../../services/errorMessage";
 import { useAppStore } from "../../state/store";
 
 type ActivityItem = {
@@ -77,7 +78,7 @@ export function ActivityRoute() {
         setItems(activity);
       })
       .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : "Couldn't load your saved activity.");
+        if (active) setError(errorMessage(cause, "We couldn't load your activity. Check your connection and try again."));
       })
       .finally(() => {
         if (active) setLoading(false);

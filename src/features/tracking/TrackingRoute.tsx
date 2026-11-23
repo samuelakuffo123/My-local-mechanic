@@ -16,6 +16,7 @@ import { AppLayout } from "../../components/AppLayout";
 import { LiveMap } from "../../components/LiveMap";
 import { getDrivingRoute } from "../../services/directions";
 import { requestService } from "../../services/requests";
+import { errorMessage } from "../../services/errorMessage";
 import type { ServiceRequest } from "../../services/apiTypes";
 import { useAppStore } from "../../state/store";
 
@@ -84,7 +85,7 @@ export function TrackingRoute() {
       setRequest(next);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "We couldn't load this request.");
+      setError(errorMessage(cause, "We couldn't load this request. It may have been removed, or your connection dropped."));
     } finally {
       setLoading(false);
     }
@@ -162,7 +163,7 @@ export function TrackingRoute() {
       setCancelledLocally(true);
       setConfirmCancel(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "We couldn't cancel this request.");
+      setError(errorMessage(cause, "We couldn't cancel the request. It may have changed—refresh and try again."));
     } finally {
       setCancelling(false);
     }

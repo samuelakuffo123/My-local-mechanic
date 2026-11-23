@@ -49,11 +49,11 @@ export function canTransition(from: RequestStatus, to: RequestStatus) {
 
 export function assertTransition(from: RequestStatus, to: RequestStatus, actorRole: ActorRole) {
   if (!canTransition(from, to)) {
-    return { ok: false as const, reason: `Illegal transition ${from} → ${to}.` };
+    return { ok: false as const, reason: "This job can't be moved to that stage." };
   }
   const allowed = roleForTransition[to] ?? [];
   if (!allowed.includes(actorRole)) {
-    return { ok: false as const, reason: `${actorRole} may not move a job to ${to}.` };
+    return { ok: false as const, reason: "You don't have permission to move this job to that stage." };
   }
   return { ok: true as const };
 }

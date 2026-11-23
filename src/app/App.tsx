@@ -3,6 +3,7 @@ import { RouterProvider } from "react-router";
 import { useAppStore } from "../state/store";
 import { router } from "./routes";
 import SplashScreen from "../features/splash/SplashScreen";
+import { errorMessage } from "../services/errorMessage";
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -17,8 +18,7 @@ export default function App() {
       await hydrate();
       setReady(true);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message.trim() : "";
-      setError(message || "We couldn't restore your session. Check your connection and try again.");
+      setError(errorMessage(cause, "We couldn't restore your session. Check your connection and try again."));
     }
   }
 

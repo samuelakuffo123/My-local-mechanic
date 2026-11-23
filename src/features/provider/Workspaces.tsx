@@ -1,5 +1,5 @@
 import "./providerWorkspace.css";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -27,6 +27,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { Skeleton, SkeletonRegion } from "../../components/Skeleton";
 import { estimateService } from "../../services/estimates";
 import { notificationService } from "../../services/notifications";
 import { paymentService } from "../../services/payments";
@@ -40,20 +41,12 @@ import type {
   ServiceRequest,
 } from "../../services/apiTypes";
 import { useAppStore } from "../../state/store";
+import { useRemote } from "../../hooks/useRemote";
+import { errorMessage } from "../../services/errorMessage";
 
 export type ProviderRole = "mechanic" | "tow" | "vendor";
 
 type Tab = "home" | "jobs" | "activity" | "business";
-
-interface AsyncState<T> {
-  data: T;
-  loading: boolean;
-  error: string | null;
-}
-
-interface Remote<T> extends AsyncState<T> {
-  reload: () => void;
-}
 
 const ROLES: Record<
   ProviderRole,
@@ -130,40 +123,6 @@ const LIFECYCLE: RequestStatus[] = [
 
 const QUOTE_STATUSES: RequestStatus[] = ["diagnosing", "awaitingApproval", "repairing", "awaitingParts"];
 
-function useRemote<T>(load: () => Promise<T>, initial: T, deps: unknown[], enabled = true): Remote<T> {
-  const [state, setState] = useState<AsyncState<T>>({ data: initial, loading: enabled, error: null });
-  const [nonce, setNonce] = useState(0);
-  const run = useCallback(load, deps);
-  const reload = useCallback(() => setNonce((value) => value + 1), []);
-
-  useEffect(() => {
-    if (!enabled) {
-      setState({ data: initial, loading: false, error: null });
-      return;
-    }
-    let active = true;
-    setState((current) => ({ ...current, loading: true, error: null }));
-    run()
-      .then((data) => {
-        if (active) setState({ data, loading: false, error: null });
-      })
-      .catch((cause: unknown) => {
-        if (active) {
-          setState((current) => ({
-            ...current,
-            loading: false,
-            error: cause instanceof Error ? cause.message : "Something went wrong.",
-          }));
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [enabled, run, nonce]);
-
-  return { ...state, reload };
-}
-
 function formatMoney(value: number) {
   return `GHS ${value.toLocaleString("en-GH", { maximumFractionDigits: 0 })}`;
 }
@@ -235,21 +194,27 @@ function RemoteState({
   empty,
   title,
   copy,
+  loadingCopy,
   onRetry,
+  skeleton,
 }: {
   loading: boolean;
   error: string | null;
   empty: boolean;
   title: string;
   copy: string;
+  loadingCopy?: string;
   onRetry?: () => void;
+  skeleton?: ReactNode;
 }) {
   if (loading) {
+    const message = loadingCopy ?? copy;
+    if (skeleton) return <SkeletonRegion label={message}>{skeleton}</SkeletonRegion>;
     return (
       <div className="pw-empty" aria-live="polite">
         <LoaderCircle className="pw-spin" size={24} />
         <strong>Loading…</strong>
-        <p>{copy}</p>
+        <p>{message}</p>
       </div>
     );
   }
@@ -298,6 +263,120 @@ function MetricCard({
   );
 }
 
+function MetricGridSkeleton() {
+  return (
+    <div className="pw-metrics">
+      {[0, 1, 2, 3].map((item) => (
+        <article className="pw-metric pw-metric--skeleton" key={item}>
+          <Skeleton className="pw-skeleton-icon" />
+          <Skeleton className="pw-skeleton-line pw-skeleton-line--label" />
+          <Skeleton className="pw-skeleton-line pw-skeleton-line--value" />
+          <Skeleton className="pw-skeleton-line pw-skeleton-line--detail" />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function JobListSkeleton({ count = 2, incoming = false }: { count?: number; incoming?: boolean }) {
+  return (
+    <div className="pw-skeleton-stack">
+      {incoming && (
+        <div className="pw-incoming pw-skeleton-card">
+          <div className="pw-incoming__top">
+            <Skeleton className="pw-skeleton-icon pw-skeleton-icon--lg" />
+            <div className="pw-skeleton-copy">
+              <Skeleton className="pw-skeleton-line pw-skeleton-line--label" />
+              <Skeleton className="pw-skeleton-line pw-skeleton-line--heading" />
+              <Skeleton className="pw-skeleton-line pw-skeleton-line--detail" />
+            </div>
+          </div>
+          <div className="pw-incoming__actions">
+            <Skeleton className="pw-skeleton-button" />
+            <Skeleton className="pw-skeleton-button pw-skeleton-button--quiet" />
+          </div>
+        </div>
+      )}
+      {Array.from({ length: count }, (_, index) => (
+        <div className="pw-job-row pw-skeleton-job" key={index}>
+          <Skeleton className="pw-skeleton-icon" />
+          <div className="pw-job-row__body">
+            <Skeleton className="pw-skeleton-line pw-skeleton-line--heading" />
+            <Skeleton className="pw-skeleton-line pw-skeleton-line--detail" />
+          </div>
+          <Skeleton className="pw-skeleton-pill" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ActivitySkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <div className="pw-skeleton-stack">
+      {Array.from({ length: count }, (_, index) => (
+        <article className="pw-activity-row pw-skeleton-activity" key={index}>
+          <Skeleton className="pw-skeleton-icon" />
+          <div className="pw-skeleton-copy">
+            <Skeleton className="pw-skeleton-line pw-skeleton-line--heading" />
+            <Skeleton className="pw-skeleton-line pw-skeleton-line--detail" />
+            <Skeleton className="pw-skeleton-line pw-skeleton-line--meta" />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function PanelSkeleton() {
+  return (
+    <div className="pw-panel pw-skeleton-panel">
+      <div className="pw-panel__head">
+        <div className="pw-skeleton-copy">
+          <Skeleton className="pw-skeleton-line pw-skeleton-line--label" />
+          <Skeleton className="pw-skeleton-line pw-skeleton-line--heading" />
+          <Skeleton className="pw-skeleton-line pw-skeleton-line--detail" />
+        </div>
+      </div>
+      <div className="pw-detail-grid">
+        {[0, 1, 2, 3].map((item) => (
+          <div key={item}>
+            <Skeleton className="pw-skeleton-line pw-skeleton-line--label" />
+            <Skeleton className="pw-skeleton-line pw-skeleton-line--heading" />
+          </div>
+        ))}
+      </div>
+      <Skeleton className="pw-skeleton-block" />
+    </div>
+  );
+}
+
+function StatusSkeleton() {
+  return (
+    <div className="pw-status" role="status" aria-label="Checking your account status">
+      <Skeleton className="pw-skeleton-icon" />
+      <div className="pw-skeleton-copy">
+        <Skeleton className="pw-skeleton-line pw-skeleton-line--heading" />
+        <Skeleton className="pw-skeleton-line pw-skeleton-line--detail" />
+      </div>
+    </div>
+  );
+}
+
+function ChecklistSkeleton() {
+  return (
+    <div className="pw-checklist" aria-hidden="true">
+      {[0, 1, 2, 3].map((item) => (
+        <div key={item}>
+          <Skeleton className="pw-skeleton-icon" />
+          <Skeleton className="pw-skeleton-line pw-skeleton-line--detail" />
+          <Skeleton className="pw-skeleton-line pw-skeleton-line--meta" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function IncomingCard({
   request,
   busyKey,
@@ -308,6 +387,9 @@ function IncomingCard({
   onRespond: (accept: boolean) => void;
 }) {
   const key = `request-${request.id}`;
+  const accepting = busyKey === `${key}-accept`;
+  const declining = busyKey === `${key}-decline`;
+  const busy = accepting || declining;
   return (
     <section className="pw-incoming">
       <div className="pw-incoming__top">
@@ -325,15 +407,16 @@ function IncomingCard({
       <div className="pw-incoming__actions">
         <button
           className="pw-button pw-button--primary"
-          disabled={busyKey === key}
+          disabled={busy}
           onClick={() => onRespond(true)}
           type="button"
         >
-          {busyKey === key ? <LoaderCircle className="pw-spin" size={16} /> : <Check size={16} />}
-          Accept job
+          {accepting ? <LoaderCircle className="pw-spin" size={16} /> : <Check size={16} />}
+          {accepting ? "Accepting…" : "Accept job"}
         </button>
-        <button className="pw-button pw-button--quiet" disabled={busyKey === key} onClick={() => onRespond(false)} type="button">
-          Decline
+        <button className="pw-button pw-button--quiet" disabled={busy} onClick={() => onRespond(false)} type="button">
+          {declining && <LoaderCircle className="pw-spin" size={16} />}
+          {declining ? "Declining…" : "Decline"}
         </button>
       </div>
     </section>
@@ -365,6 +448,7 @@ function JobRow({
 /** Publishes the provider's position only while the job is active. */
 function ShareLocation({ request }: { request: ServiceRequest }) {
   const [sharing, setSharing] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const watchId = useRef<number | null>(null);
@@ -378,6 +462,7 @@ function ShareLocation({ request }: { request: ServiceRequest }) {
     watchId.current = null;
     sending.current = false;
     setSharing(false);
+    setConnecting(false);
   }, []);
 
   useEffect(() => stop, [stop, request.id]);
@@ -388,8 +473,9 @@ function ShareLocation({ request }: { request: ServiceRequest }) {
       return;
     }
     setError(null);
-    setMessage("Waiting for a GPS fix…");
+    setMessage("Getting a GPS fix…");
     setSharing(true);
+    setConnecting(true);
     watchId.current = navigator.geolocation.watchPosition(
       (position) => {
         if (sending.current) return;
@@ -402,10 +488,11 @@ function ShareLocation({ request }: { request: ServiceRequest }) {
           .then(() => {
             lastSent.current = { ...next, at: Date.now() };
             setError(null);
+            setConnecting(false);
             setMessage(`Sharing live · updated ${formatTime(new Date().toISOString())}`);
           })
           .catch((cause: unknown) => {
-            setError(cause instanceof Error ? cause.message : "Could not share your location.");
+            setError(errorMessage(cause, "We couldn't share your location. Check permissions and try again."));
             stop();
           })
           .finally(() => {
@@ -429,10 +516,19 @@ function ShareLocation({ request }: { request: ServiceRequest }) {
       <span className="pw-share__icon"><Navigation size={17} /></span>
       <div>
         <strong>{sharing ? "Customer can see you moving" : "Share your live position"}</strong>
-        <p>{error ?? message ?? "The customer’s tracking page updates as you travel."}</p>
+        <p>
+          {error ?? (
+            sharing && message ? (
+              <span className="pw-inline-busy"><LoaderCircle className="pw-spin" size={13} /> {message}</span>
+            ) : (
+              message ?? "The customer’s tracking page updates as you travel."
+            )
+          )}
+        </p>
       </div>
-      <button className="pw-button pw-button--soft" onClick={sharing ? stop : start} type="button">
-        {sharing ? "Stop" : "Share"}
+      <button aria-busy={connecting} className="pw-button pw-button--soft" onClick={sharing ? stop : start} type="button">
+        {connecting && <LoaderCircle className="pw-spin" size={15} />}
+        {connecting ? "Connecting…" : sharing ? "Stop" : "Share"}
       </button>
     </section>
   );
@@ -447,15 +543,20 @@ function JobDetail({
   request: ServiceRequest;
   role: ProviderRole;
   busyKey: string | null;
-  onAction: (key: string, action: () => Promise<unknown>) => Promise<boolean> | void;
+  onAction: (key: string, action: () => Promise<unknown>, fallback: string) => Promise<boolean> | void;
 }) {
   const assigned = Boolean(request.providerId);
-  const actions = useRemote(() => requestService.actions(request.id), [], [request.id, request.version]);
+  const actions = useRemote(() => requestService.actions(request.id), [], [request.id, request.version], {
+    fallback: "We couldn't check the available job actions. Refresh and try again.",
+  });
   const summary = useRemote<EstimateSummary | null>(
     () => estimateService.summary(request.id),
     null,
     [request.id, request.version],
-    assigned,
+    {
+      enabled: assigned,
+      fallback: "We couldn't check the quote for this job. Try again.",
+    },
   );
   const [item, setItem] = useState("");
   const [quantity, setQuantity] = useState("1");
@@ -464,7 +565,7 @@ function JobDetail({
   const index = LIFECYCLE.indexOf(request.status);
   const visibleActions = actions.data.filter((to) => to !== "cancelled" && !(request.status === "requested" && to === "accepted"));
   const hasApprovedQuote = Boolean(summary.data?.approvedTotalGhs);
-  const canQuote = QUOTE_STATUSES.includes(request.status) && !hasApprovedQuote;
+  const canQuote = QUOTE_STATUSES.includes(request.status) && !hasApprovedQuote && !summary.loading;
   const progress = index < 0 ? 0 : (index / (LIFECYCLE.length - 1)) * 100;
   const RoleIcon = ROLES[role].Icon;
 
@@ -477,10 +578,13 @@ function JobDetail({
       return;
     }
     setQuoteError(null);
-    const submitted = await onAction(`quote-${request.id}`, () =>
-      estimateService.submit(request.id, {
-        items: [{ kind: role === "tow" ? "transport" : "other", description: item.trim(), quantity: parsedQuantity, unitPriceGhs: parsedPrice }],
-      }),
+    const submitted = await onAction(
+      `quote-${request.id}`,
+      () =>
+        estimateService.submit(request.id, {
+          items: [{ kind: role === "tow" ? "transport" : "other", description: item.trim(), quantity: parsedQuantity, unitPriceGhs: parsedPrice }],
+        }),
+      "We couldn't send the quote. Check the details and try again.",
     );
     if (submitted !== false) {
       setItem("");
@@ -527,31 +631,52 @@ function JobDetail({
             {request.status === "requested" ? "Use Accept job or Decline above." : "No further actions for this job."}
           </span>
         )}
-        {!actions.loading && !actions.error && visibleActions.map((to) => (
-          <button
-            className="pw-button pw-button--primary"
-            disabled={busyKey !== null}
-            key={to}
-            onClick={() => onAction(`job-${request.id}-${to}`, () => requestService.transition(request.id, to))}
-            type="button"
-          >
-            {busyKey?.startsWith(`job-${request.id}`) ? <LoaderCircle className="pw-spin" size={16} /> : <ArrowRight size={16} />}
-            Move to {STATUS_LABELS[to]}
-          </button>
-        ))}
+        {!actions.loading && !actions.error && visibleActions.map((to) => {
+          const busy = busyKey === `job-${request.id}-${to}`;
+          return (
+            <button
+              className="pw-button pw-button--primary"
+              disabled={busyKey !== null}
+              key={to}
+              onClick={() => onAction(
+                `job-${request.id}-${to}`,
+                () => requestService.transition(request.id, to),
+                "We couldn't move the job to that stage. Refresh and try again.",
+              )}
+              type="button"
+            >
+              {busy ? <LoaderCircle className="pw-spin" size={16} /> : <ArrowRight size={16} />}
+              {busy ? `Moving to ${STATUS_LABELS[to]}…` : `Move to ${STATUS_LABELS[to]}`}
+            </button>
+          );
+        })}
         {actions.data.includes("cancelled") && (
           <button
             className="pw-button pw-button--danger-text"
             disabled={busyKey !== null}
-            onClick={() => onAction(`cancel-${request.id}`, () => requestService.cancel(request.id, "Cancelled from provider workspace"))}
+            onClick={() => onAction(
+              `cancel-${request.id}`,
+              () => requestService.cancel(request.id, "Cancelled from provider workspace"),
+              "We couldn't cancel the job. It may have changed—refresh and try again.",
+            )}
             type="button"
           >
-            Cancel job
+            {busyKey === `cancel-${request.id}` && <LoaderCircle className="pw-spin" size={16} />}
+            {busyKey === `cancel-${request.id}` ? "Cancelling…" : "Cancel job"}
           </button>
         )}
       </div>
 
       {assigned && request.status !== "completed" && request.status !== "cancelled" && <ShareLocation request={request} />}
+
+      {assigned && summary.loading && (
+        <span className="pw-hint" role="status"><LoaderCircle className="pw-spin" size={15} /> Checking quote status…</span>
+      )}
+      {assigned && summary.error && (
+        <span className="pw-inline-error" role="alert">
+          {summary.error} <button onClick={summary.reload} type="button">Retry</button>
+        </span>
+      )}
 
       {summary.data && summary.data.approvedTotalGhs > 0 && (
         <div className="pw-quote-summary">
@@ -583,7 +708,7 @@ function JobDetail({
           {quoteError && <p className="pw-inline-error" role="alert">{quoteError}</p>}
           <button className="pw-button pw-button--soft" disabled={busyKey !== null} type="submit">
             {busyKey === `quote-${request.id}` ? <LoaderCircle className="pw-spin" size={16} /> : <Plus size={16} />}
-            Submit quote
+            {busyKey === `quote-${request.id}` ? "Submitting quote…" : "Submit quote"}
           </button>
         </form>
       )}
@@ -699,14 +824,14 @@ function BusinessForm({
       </div>
       <button className="pw-locate" disabled={locating || busy} onClick={locate} type="button">
         {locating ? <LoaderCircle className="pw-spin" size={16} /> : <MapPin size={16} />}
-        Use my current location
+        {locating ? "Locating…" : "Use my current location"}
       </button>
       {error && <p className="pw-inline-error" role="alert">{error}</p>}
       <div className="pw-form__actions">
         {onCancel && <button className="pw-button pw-button--quiet" disabled={busy} onClick={onCancel} type="button">Cancel</button>}
         <button className="pw-button pw-button--primary" disabled={busy} type="submit">
           {busy ? <LoaderCircle className="pw-spin" size={16} /> : <Check size={16} />}
-          {initial ? "Save changes" : "Submit application"}
+          {busy ? (initial ? "Saving…" : "Submitting…") : initial ? "Save changes" : "Submit application"}
         </button>
       </div>
     </form>
@@ -764,7 +889,7 @@ function CredentialForm({
         <button className="pw-button pw-button--quiet" disabled={busy} onClick={onCancel} type="button">Cancel</button>
         <button className="pw-button pw-button--primary" disabled={busy} type="submit">
           {busy ? <LoaderCircle className="pw-spin" size={16} /> : <Plus size={16} />}
-          Add document
+          {busy ? "Adding…" : "Add document"}
         </button>
       </div>
     </form>
@@ -776,6 +901,9 @@ function BusinessPanel({
   profile,
   credentials,
   busyKey,
+  loading,
+  error,
+  onRetry,
   onApply,
   onCredential,
   onAvailability,
@@ -784,6 +912,9 @@ function BusinessPanel({
   profile: ProviderProfile | null;
   credentials: ProviderCredential[];
   busyKey: string | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
   onApply: (input: Parameters<BusinessFormProps["onSubmit"]>[0]) => void;
   onCredential: (input: { documentType: string; documentRef: string; expiresAt?: string }) => void;
   onAvailability: (available: boolean) => void;
@@ -792,6 +923,30 @@ function BusinessPanel({
   const [addingDocument, setAddingDocument] = useState(false);
   const verified = profile?.status === "verified";
   const mismatch = profile != null && profile.type !== role;
+
+  if (loading) return <SkeletonRegion label="Loading business details"><PanelSkeleton /></SkeletonRegion>;
+
+  if (error) {
+    return (
+      <div className="pw-panel">
+        <div className="pw-panel__head">
+          <div>
+            <span className="pw-overline">BUSINESS PROFILE</span>
+            <h2>Business details unavailable</h2>
+            <p>We'll show your setup options once the profile loads.</p>
+          </div>
+        </div>
+        <RemoteState
+          copy="We couldn't load your business details."
+          empty={false}
+          error={error}
+          loading={false}
+          onRetry={onRetry}
+          title="Business details unavailable"
+        />
+      </div>
+    );
+  }
 
   if (!profile || editing) {
     return (
@@ -851,14 +1006,15 @@ function BusinessPanel({
         {verified && (
           <button
             aria-checked={profile.available}
+            aria-busy={busyKey === "availability"}
             className={`pw-availability${profile.available ? " is-on" : ""}`}
             disabled={busyKey === "availability"}
             onClick={() => onAvailability(!profile.available)}
             role="switch"
             type="button"
           >
-            <span><i /></span>
-            <div><strong>{profile.available ? ROLES[role].online : ROLES[role].offline}</strong><small>{profile.available ? "You can turn this off at any time." : "Turn on when you’re ready for new requests."}</small></div>
+            <span><i>{busyKey === "availability" && <LoaderCircle className="pw-spin" size={12} />}</i></span>
+            <div><strong>{profile.available ? ROLES[role].online : ROLES[role].offline}</strong><small>{busyKey === "availability" ? "Updating dispatch status…" : profile.available ? "You can turn this off at any time." : "Turn on when you’re ready for new requests."}</small></div>
           </button>
         )}
       </div>
@@ -921,6 +1077,7 @@ type BusinessFormProps = { onSubmit: (input: {
 function ActivityPanel({
   notifications,
   loading,
+  refreshing,
   error,
   busyKey,
   onMarkRead,
@@ -928,6 +1085,7 @@ function ActivityPanel({
 }: {
   notifications: AppNotification[];
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   busyKey: string | null;
   onMarkRead: (id: string) => void;
@@ -941,8 +1099,15 @@ function ActivityPanel({
           <h2>Activity</h2>
           <p>Assignment, status and payment updates for your account.</p>
         </div>
-        <button aria-label="Refresh notifications" className="pw-icon-button" disabled={loading} onClick={onReload} type="button">
-          <RefreshCw className={loading ? "pw-spin" : ""} size={17} />
+        <button
+          aria-label={refreshing ? "Refreshing notifications" : "Refresh notifications"}
+          aria-busy={refreshing}
+          className="pw-icon-button"
+          disabled={loading || refreshing}
+          onClick={onReload}
+          type="button"
+        >
+          <RefreshCw className={refreshing ? "pw-spin" : ""} size={17} />
         </button>
       </div>
       <RemoteState
@@ -950,7 +1115,9 @@ function ActivityPanel({
         empty={notifications.length === 0}
         error={error}
         loading={loading}
+        loadingCopy="Loading your latest updates…"
         onRetry={onReload}
+        skeleton={<ActivitySkeleton />}
         title="Nothing new yet"
       />
       <div className="pw-activity">
@@ -964,12 +1131,13 @@ function ActivityPanel({
             </div>
             {!notification.read && (
               <button
+                aria-busy={busyKey === `notification-${notification.id}`}
                 disabled={busyKey === `notification-${notification.id}`}
                 onClick={() => onMarkRead(notification.id)}
                 type="button"
               >
                 {busyKey === `notification-${notification.id}` ? <LoaderCircle className="pw-spin" size={14} /> : <Check size={14} />}
-                Mark read
+                {busyKey === `notification-${notification.id}` ? "Marking…" : "Mark read"}
               </button>
             )}
           </article>
@@ -983,11 +1151,17 @@ function VendorStorefront({
   profile,
   credentials,
   nearbyCount,
+  loading,
+  error,
+  onRetry,
   onOpenBusiness,
 }: {
   profile: ProviderProfile | null;
   credentials: ProviderCredential[];
   nearbyCount: number;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
   onOpenBusiness: () => void;
 }) {
   const steps = [
@@ -1013,20 +1187,30 @@ function VendorStorefront({
         <div className="pw-panel__head">
           <div>
             <span className="pw-overline">LOCAL VISIBILITY</span>
-            <h2>{ready ? "Your storefront is live" : "Get discovery-ready"}</h2>
-            <p>{nearbyCount} verified parts vendor{nearbyCount === 1 ? " appears" : "s appear"} in nearby search.</p>
+            <h2>{loading ? "Preparing your storefront" : error ? "Visibility unavailable" : ready ? "Your storefront is live" : "Get discovery-ready"}</h2>
+            {loading ? (
+              <p className="pw-inline-busy"><LoaderCircle className="pw-spin" size={13} /> Checking nearby visibility…</p>
+            ) : error ? (
+              <p className="pw-inline-error" role="alert">{error} <button onClick={onRetry} type="button">Try again</button></p>
+            ) : (
+              <p>{nearbyCount} verified parts vendor{nearbyCount === 1 ? " appears" : "s appear"} in nearby search.</p>
+            )}
           </div>
-          <button className="pw-link" onClick={onOpenBusiness} type="button">Manage <ArrowRight size={15} /></button>
+          <button className="pw-link" disabled={loading} onClick={onOpenBusiness} type="button">Manage <ArrowRight size={15} /></button>
         </div>
-        <div className="pw-checklist">
-          {steps.map((step) => (
-            <div className={step.done ? "is-done" : ""} key={step.label}>
-              {step.done ? <CheckCircle2 size={17} /> : <Clock3 size={17} />}
-              <span>{step.label}</span>
-              <small>{step.done ? "Done" : "Pending"}</small>
-            </div>
-          ))}
-        </div>
+        {loading ? (
+          <SkeletonRegion label="Checking storefront setup"><ChecklistSkeleton /></SkeletonRegion>
+        ) : (
+          <div className="pw-checklist">
+            {steps.map((step) => (
+              <div className={step.done ? "is-done" : ""} key={step.label}>
+                {step.done ? <CheckCircle2 size={17} /> : <Clock3 size={17} />}
+                <span>{step.label}</span>
+                <small>{step.done ? "Done" : "Pending"}</small>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );
@@ -1050,14 +1234,20 @@ export default function ProviderWorkspaces({
     () => providerService.me(),
     { provider: null, credentials: [] },
     [],
+    { fallback: "We couldn't load your provider profile. Check your connection and try again." },
   );
   const requests = useRemote<ServiceRequest[]>(
     () => (role === "vendor" ? Promise.resolve([]) : requestService.list()),
     [],
     [role],
+    { fallback: "We couldn't load your jobs. Check your connection and try again." },
   );
-  const payments = useRemote(() => paymentService.list(), [], []);
-  const notifications = useRemote(() => notificationService.list(), [], []);
+  const payments = useRemote(() => paymentService.list(), [], [], {
+    fallback: "We couldn't load your payment history. Try again.",
+  });
+  const notifications = useRemote(() => notificationService.list(), [], [], {
+    fallback: "We couldn't load your updates. Try again.",
+  });
   const nearby = useRemote(
     () =>
       role === "vendor"
@@ -1070,6 +1260,7 @@ export default function ProviderWorkspaces({
         : Promise.resolve([]),
     [],
     [role, profileState.data.provider?.status, profileState.data.provider?.available, profileState.data.provider?.lat, profileState.data.provider?.lng],
+    { fallback: "We couldn't check nearby visibility. Try again." },
   );
 
   const reloadAll = useCallback(() => {
@@ -1081,7 +1272,7 @@ export default function ProviderWorkspaces({
   }, [nearby, notifications, payments, profileState, requests]);
 
   const runAction = useCallback(
-    async (key: string, action: () => Promise<unknown>): Promise<boolean> => {
+    async (key: string, action: () => Promise<unknown>, fallback: string): Promise<boolean> => {
       setBusyKey(key);
       setActionError(null);
       try {
@@ -1089,7 +1280,7 @@ export default function ProviderWorkspaces({
         reloadAll();
         return true;
       } catch (cause) {
-        setActionError(cause instanceof Error ? cause.message : "That action couldn’t be completed.");
+        setActionError(errorMessage(cause, fallback));
         return false;
       } finally {
         setBusyKey(null);
@@ -1107,6 +1298,12 @@ export default function ProviderWorkspaces({
   const paidTotal = payments.data.filter((item) => item.status === "paid").reduce((sum, item) => sum + item.amountGhs, 0);
   const status = statusFor(profile, role);
   const verified = profile?.status === "verified";
+  const metricsLoading = role === "vendor"
+    ? profileState.loading || nearby.loading || notifications.loading
+    : profileState.loading || requests.loading || payments.loading || notifications.loading;
+  const metricsError = role === "vendor"
+    ? nearby.error ?? notifications.error
+    : requests.error ?? payments.error ?? notifications.error;
   const RoleIcon = config.Icon;
 
   useEffect(() => {
@@ -1132,13 +1329,21 @@ export default function ProviderWorkspaces({
 
   const respond = (accept: boolean) => {
     if (!incoming) return;
-    void runAction(`request-${incoming.id}`, () =>
-      accept ? requestService.accept(incoming.id) : requestService.decline(incoming.id, "Declined from provider workspace"),
+    void runAction(
+      `request-${incoming.id}-${accept ? "accept" : "decline"}`,
+      () => accept ? requestService.accept(incoming.id) : requestService.decline(incoming.id, "Declined from provider workspace"),
+      accept
+        ? "We couldn't accept the request. It may have been taken—refresh and try again."
+        : "We couldn't decline the request. Refresh and try again.",
     );
   };
 
   const toggleAvailability = (available: boolean) => {
-    void runAction("availability", () => providerService.setAvailability(available));
+    void runAction(
+      "availability",
+      () => providerService.setAvailability(available),
+      "We couldn't update your dispatch status. Try again.",
+    );
   };
 
   const greeting = new Intl.DateTimeFormat("en-GH", { hour: "numeric", timeZone: "Africa/Accra" }).format(new Date());
@@ -1150,28 +1355,47 @@ export default function ProviderWorkspaces({
         <span className="pw-header__mark"><RoleIcon size={21} /></span>
         <div className="pw-header__identity">
           <span className="pw-overline">{config.eyebrow}</span>
-          <h1>{profile?.businessName ?? user?.name ?? config.label}</h1>
+          <h1>
+            {profileState.loading
+              ? <Skeleton className="pw-skeleton-line pw-skeleton-title" />
+              : profile?.businessName ?? user?.name ?? config.label}
+          </h1>
         </div>
         <button aria-label="Sign out" className="pw-icon-button" onClick={onExit} type="button"><LogOut size={18} /></button>
       </header>
 
-      <section className={`pw-status pw-status--${status.tone}`} aria-live="polite">
-        <span className="pw-status__icon">{status.tone === "verified" ? <BadgeCheck size={18} /> : <ShieldCheck size={18} />}</span>
-        <div><strong>{status.title}</strong><p>{status.copy}</p></div>
-        {!verified && <button className="pw-link" onClick={() => setTab("business")} type="button">Review</button>}
-      </section>
+      {profileState.error && (
+        <div className="pw-alert" role="alert">
+          <AlertCircle size={17} /> <span>{profileState.error}</span>
+          <button onClick={profileState.reload} type="button">Try again</button>
+        </div>
+      )}
+
+      {profileState.loading ? (
+        <StatusSkeleton />
+      ) : profileState.error ? null : (
+        <section className={`pw-status pw-status--${status.tone}`} aria-live="polite">
+          <span className="pw-status__icon">{status.tone === "verified" ? <BadgeCheck size={18} /> : <ShieldCheck size={18} />}</span>
+          <div><strong>{status.title}</strong><p>{status.copy}</p></div>
+          {!verified && <button className="pw-link" onClick={() => setTab("business")} type="button">Review</button>}
+        </section>
+      )}
 
       {verified && (
         <button
           aria-checked={profile?.available ?? false}
+          aria-busy={busyKey === "availability"}
           className={`pw-online${profile?.available ? " is-on" : ""}`}
           disabled={busyKey === "availability"}
           onClick={() => toggleAvailability(!profile?.available)}
           role="switch"
           type="button"
         >
-          <span className="pw-online__dot"><i /></span>
-          <span><strong>{profile?.available ? config.online : config.offline}</strong><small>{role === "vendor" ? "Nearby discovery" : "Dispatch status"}</small></span>
+          <span className="pw-online__dot"><i>{busyKey === "availability" && <LoaderCircle className="pw-spin" size={10} />}</i></span>
+          <span>
+            <strong>{profile?.available ? config.online : config.offline}</strong>
+            <small>{busyKey === "availability" ? "Updating dispatch status…" : role === "vendor" ? "Nearby discovery" : "Dispatch status"}</small>
+          </span>
           <span className="pw-online__switch"><i /></span>
         </button>
       )}
@@ -1192,31 +1416,41 @@ export default function ProviderWorkspaces({
               <p>{config.intro}</p>
             </div>
 
-            <div className="pw-metrics">
-              {role === "vendor" ? (
-                <>
-                  <MetricCard Icon={ShieldCheck} detail={profile?.status ?? "Not set"} label="Account" tone="violet" value={verified ? "Verified" : "Pending"} />
-                  <MetricCard Icon={FileCheck2} detail={`${profileState.data.credentials.length} added`} label="Documents" tone="blue" value={String(profileState.data.credentials.length)} />
-                  <MetricCard Icon={Store} detail="Across nearby search" label="Verified vendors" tone="green" value={String(nearby.data.length)} />
-                  <MetricCard Icon={Bell} detail="Waiting for you" label="New updates" tone="amber" value={String(unread)} />
-                </>
-              ) : (
-                <>
-                  <MetricCard Icon={ClipboardList} detail={`${incoming ? "1 needs a reply" : "All caught up"}`} label="Active jobs" tone="violet" value={String(activeJobs.length)} />
-                  <MetricCard Icon={Banknote} detail="Server-verified payments" label="Paid earnings" tone="green" value={formatMoney(paidTotal)} />
-                  <MetricCard Icon={CheckCircle2} detail="From your job list" label="Completed" tone="blue" value={String(jobs.filter((job) => job.status === "completed").length)} />
-                  <MetricCard Icon={Bell} detail="Waiting for you" label="New updates" tone="amber" value={String(unread)} />
-                </>
-              )}
-            </div>
-
-            {profileState.loading && <RemoteState copy="Checking your workspace…" empty={false} error={null} loading title="" />}
+            {metricsLoading ? (
+              <SkeletonRegion label="Loading workspace metrics"><MetricGridSkeleton /></SkeletonRegion>
+            ) : metricsError ? (
+              <div className="pw-alert" role="alert">
+                <AlertCircle size={17} /> <span>Workspace figures are unavailable right now. {metricsError}</span>
+                <button onClick={reloadAll} type="button">Try again</button>
+              </div>
+            ) : (
+              <div className="pw-metrics">
+                {role === "vendor" ? (
+                  <>
+                    <MetricCard Icon={ShieldCheck} detail={profile?.status ?? "Not set"} label="Account" tone="violet" value={verified ? "Verified" : "Pending"} />
+                    <MetricCard Icon={FileCheck2} detail={`${profileState.data.credentials.length} added`} label="Documents" tone="blue" value={String(profileState.data.credentials.length)} />
+                    <MetricCard Icon={Store} detail="Across nearby search" label="Verified vendors" tone="green" value={String(nearby.data.length)} />
+                    <MetricCard Icon={Bell} detail="Waiting for you" label="New updates" tone="amber" value={String(unread)} />
+                  </>
+                ) : (
+                  <>
+                    <MetricCard Icon={ClipboardList} detail={`${incoming ? "1 needs a reply" : "All caught up"}`} label="Active jobs" tone="violet" value={String(activeJobs.length)} />
+                    <MetricCard Icon={Banknote} detail="Server-verified payments" label="Paid earnings" tone="green" value={formatMoney(paidTotal)} />
+                    <MetricCard Icon={CheckCircle2} detail="From your job list" label="Completed" tone="blue" value={String(jobs.filter((job) => job.status === "completed").length)} />
+                    <MetricCard Icon={Bell} detail="Waiting for you" label="New updates" tone="amber" value={String(unread)} />
+                  </>
+                )}
+              </div>
+            )}
 
             {role === "vendor" ? (
               <VendorStorefront
                 credentials={profileState.data.credentials}
+                loading={profileState.loading || nearby.loading}
+                error={nearby.error}
                 nearbyCount={nearby.data.length}
                 onOpenBusiness={() => setTab("business")}
+                onRetry={nearby.reload}
                 profile={profile}
               />
             ) : (
@@ -1232,13 +1466,16 @@ export default function ProviderWorkspaces({
                   error={requests.error}
                   loading={requests.loading}
                   onRetry={requests.reload}
+                  skeleton={<JobListSkeleton count={2} incoming={verified} />}
                   title={verified ? `No active ${config.jobWordPlural}` : "Waiting for verification"}
                 />
-                <div className="pw-job-list">
-                  {activeJobs.slice(0, 3).map((job) => (
-                    <JobRow key={job.id} onSelect={() => { setSelectedId(job.id); setTab("jobs"); }} request={job} selected={false} />
-                  ))}
-                </div>
+                {!requests.loading && activeJobs.length > 0 && (
+                  <div className="pw-job-list">
+                    {activeJobs.slice(0, 3).map((job) => (
+                      <JobRow key={job.id} onSelect={() => { setSelectedId(job.id); setTab("jobs"); }} request={job} selected={false} />
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </>
@@ -1261,16 +1498,24 @@ export default function ProviderWorkspaces({
               error={requests.error}
               loading={requests.loading}
               onRetry={requests.reload}
+              skeleton={<JobListSkeleton count={3} incoming={verified} />}
               title={verified ? "Your queue is clear" : "Waiting for verification"}
             />
-            {jobs.length > 0 && (
+            {!requests.loading && jobs.length > 0 && (
               <div className="pw-job-list">
                 {jobs.map((job) => (
                   <JobRow key={job.id} onSelect={() => setSelectedId(job.id)} request={job} selected={selected?.id === job.id} />
                 ))}
               </div>
             )}
-            {selected && <JobDetail busyKey={busyKey} onAction={(key, action) => runAction(key, action)} request={selected} role={role} />}
+            {selected && !requests.loading && (
+              <JobDetail
+                busyKey={busyKey}
+                onAction={(key, action, fallback) => runAction(key, action, fallback)}
+                request={selected}
+                role={role}
+              />
+            )}
           </>
         )}
 
@@ -1279,8 +1524,13 @@ export default function ProviderWorkspaces({
             busyKey={busyKey}
             error={notifications.error}
             loading={notifications.loading}
+            refreshing={notifications.refreshing}
             notifications={notifications.data}
-            onMarkRead={(id) => void runAction(`notification-${id}`, () => notificationService.markRead(id))}
+            onMarkRead={(id) => void runAction(
+              `notification-${id}`,
+              () => notificationService.markRead(id),
+              "We couldn't mark that update as read. Try again.",
+            )}
             onReload={notifications.reload}
           />
         )}
@@ -1289,9 +1539,20 @@ export default function ProviderWorkspaces({
           <BusinessPanel
             busyKey={busyKey}
             credentials={profileState.data.credentials}
-            onApply={(input) => void runAction("apply", () => providerService.apply(input))}
+            loading={profileState.loading}
+            error={profileState.error}
+            onRetry={profileState.reload}
+            onApply={(input) => void runAction(
+              "apply",
+              () => providerService.apply(input),
+              "We couldn't save your business details. Check the details and try again.",
+            )}
             onAvailability={toggleAvailability}
-            onCredential={(input) => void runAction("credential", () => providerService.addCredential(input))}
+            onCredential={(input) => void runAction(
+              "credential",
+              () => providerService.addCredential(input),
+              "We couldn't add that document. Check the reference and try again.",
+            )}
             profile={profile}
             role={role}
           />
