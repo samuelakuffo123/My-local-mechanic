@@ -40,7 +40,7 @@ function AppEntry() {
         ? needsProfileSetup(userId, Boolean(activeVehicle))
           ? "/onboarding"
           : "/app/home"
-        : "/pro";
+        : `/pro/${role}`;
 
   return <Navigate replace to={destination} />;
 }

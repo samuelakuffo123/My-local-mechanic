@@ -32,6 +32,7 @@ export async function submitEstimate(auth: AuthContext, requestId: string, input
   if (!request) throw notFound("Request not found.");
   const provider = await getProviderForUser(auth.userId);
   if (!provider) throw forbidden("Create a provider profile first.");
+  if (provider.status !== "verified") throw forbidden("Your provider account is not verified yet.");
   if (request.providerId !== provider.id) throw forbidden("You are not assigned to this request.");
   if (!["diagnosing", "awaitingApproval", "repairing", "awaitingParts"].includes(request.status)) {
     throw conflict("An estimate can be submitted after diagnosis and before completion.");

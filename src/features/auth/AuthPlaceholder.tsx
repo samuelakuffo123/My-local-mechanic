@@ -19,7 +19,7 @@ const ROLES: { value: Role; label: string }[] = [
 function homeFor(role: Role): string {
   if (role === "driver") return "/app/home";
   if (role === "admin") return "/admin";
-  return "/pro";
+  return `/pro/${role}`;
 }
 
 type PendingOtp = { phone?: string; name?: string; role?: Role; devCode?: string };

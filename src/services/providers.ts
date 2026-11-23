@@ -18,6 +18,9 @@ export interface ProviderApplyInput {
   type: "mechanic" | "tow" | "vendor";
   region?: string;
   serviceAreas?: string[];
+  lat?: number;
+  lng?: number;
+  address?: string;
 }
 
 export interface ProviderService {
