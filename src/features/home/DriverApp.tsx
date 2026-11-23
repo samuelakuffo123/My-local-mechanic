@@ -247,18 +247,6 @@ function Brand() {
   );
 }
 
-function StatusBar() {
-  return (
-    <div className="status-bar" aria-hidden="true">
-      <span>9:41</span>
-      <div className="status-bar__icons">
-        <Radio size={14} />
-        <span className="battery">87</span>
-      </div>
-    </div>
-  );
-}
-
 function AppHeader({
   title,
   onBack,

@@ -94,11 +94,6 @@ h3 {
   font-size: max(11px, 1em) !important;
 }
 
-:is(.phone-frame, .screen, .app-layout, .d-root, .s2-screen, .auth-page, .onboarding-page)
-  .status-bar :is(span, .battery) {
-  font-size: 10px !important;
-}
-
 /* App shell and navigation */
 .app-shell {
   padding: 24px;

@@ -288,7 +288,7 @@
 
 @media (min-width: 480px) {
   .onboarding-page {
-    min-height: calc(100% - 28px);
+    min-height: 100%;
   }
 }
 

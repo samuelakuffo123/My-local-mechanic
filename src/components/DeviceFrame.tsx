@@ -1,4 +1,3 @@
-import { Radio } from "lucide-react";
 import { Moon, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Theme } from "../state/types";
@@ -9,7 +8,6 @@ export function DeviceFrame({ children, theme }: { children: ReactNode; theme: T
   return (
     <div className="app-shell" data-theme={theme}>
       <div className="phone-frame">
-        <div className="status-bar" aria-hidden="true"><span>9:41</span><div className="status-bar__icons"><Radio size={14} /><span className="battery">87</span></div></div>
         {children}
       </div>
       <aside className="device-controls" aria-label="Preview controls">
