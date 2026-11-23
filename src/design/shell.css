@@ -1,0 +1,40 @@
+/* Responsive page shell. Loaded last so it replaces the old fake-phone frame
+   rules in index.css and premium.css without touching the screens inside. */
+
+body:has(.app-shell) { overflow: auto; }
+
+.app-shell[data-theme] {
+  min-height: 100dvh;
+  height: auto;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  background: var(--bg);
+}
+
+.app-shell[data-theme] > .phone-frame {
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow-x: clip;
+  overflow-y: visible;
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Screens inside the column fill the available height. */
+.app-shell[data-theme] > .phone-frame > * { flex: 1 1 auto; }
+
+@media (min-width: 480px) {
+  .app-shell[data-theme] > .phone-frame {
+    border-inline: 1px solid var(--border);
+  }
+}
+
+.device-controls { display: none !important; }
