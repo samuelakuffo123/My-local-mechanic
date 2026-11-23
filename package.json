@@ -18,8 +18,11 @@
     "node": ">=24"
   },
   "dependencies": {
+    "@neon/config": "^1.14.4",
+    "@neon/env": "^2.1.7",
     "lucide-react": "^1.52.0",
     "mapbox-gl": "^3.34.2",
+    "pg": "^8.23.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^7.18.4",
@@ -29,6 +32,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",

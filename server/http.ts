@@ -140,7 +140,7 @@ async function readBody(req: IncomingMessage): Promise<{ body: unknown; raw: str
 }
 
 export interface ServerHooks {
-  authenticate: (token: string) => AuthContext | null;
+  authenticate: (token: string) => AuthContext | null | Promise<AuthContext | null>;
 }
 
 export function createRequestHandler(hooks: ServerHooks) {
@@ -173,7 +173,7 @@ export function createRequestHandler(hooks: ServerHooks) {
       assertJsonContentType(req);
 
       const token = extractToken(req);
-      const auth = token ? hooks.authenticate(token) : null;
+      const auth = token ? await hooks.authenticate(token) : null;
       const parsed = method === "GET" || method === "DELETE" ? { body: null, raw: "" } : await readBody(req);
       const body = parsed.body;
 

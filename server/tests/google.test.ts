@@ -69,7 +69,7 @@ test("Google sign-in verifies tokens, links emails, and issues MechNow sessions"
     };
   }
 
-  const userCount = () => Number(get<{ count: number }>("SELECT COUNT(*) as count FROM users")?.count ?? 0);
+  const userCount = async () => Number((await get<{ count: number }>("SELECT COUNT(*) as count FROM users"))?.count ?? 0);
 
   try {
     const config = await call("/api/auth/google/config");
@@ -80,7 +80,7 @@ test("Google sign-in verifies tokens, links emails, and issues MechNow sessions"
       const rejected = await call("/api/auth/google", { body: { accessToken } });
       assert.equal(rejected.status, 401, `${accessToken} is rejected`);
     }
-    assert.equal(userCount(), 0, "rejected tokens never create users");
+    assert.equal(await userCount(), 0, "rejected tokens never create users");
 
     // A phone account with the same verified email is linked, not duplicated.
     const otp = await call("/api/auth/otp/request", { body: { phone: "0244000001" } });
@@ -101,7 +101,7 @@ test("Google sign-in verifies tokens, links emails, and issues MechNow sessions"
     assert.equal(linked.status, 200);
     assert.equal(linked.json.user.id, phoneSession.json.user.id, "verified email links to the existing user");
     assert.equal(linked.json.user.role, "driver", "an existing account's role is not changed");
-    assert.equal(userCount(), 1);
+    assert.equal(await userCount(), 1);
 
     // A new Google identity creates a driver/provider and returns a usable session.
     const created = await call("/api/auth/google", {
@@ -110,12 +110,12 @@ test("Google sign-in verifies tokens, links emails, and issues MechNow sessions"
     assert.equal(created.status, 200);
     assert.equal(created.json.user.role, "mechanic");
     assert.equal(created.json.user.email, "kofi@example.com");
-    assert.equal(userCount(), 2);
+    assert.equal(await userCount(), 2);
     assert.equal((await call("/api/me", { token: created.json.token })).status, 200);
 
     const repeat = await call("/api/auth/google", { body: { accessToken: "new-google-access-token" } });
     assert.equal(repeat.json.user.id, created.json.user.id, "the Google subject is stable across sign-ins");
-    assert.equal(userCount(), 2, "repeat sign-in does not create another user");
+    assert.equal(await userCount(), 2, "repeat sign-in does not create another user");
   } finally {
     await new Promise<void>((resolve) => apiServer.close(() => resolve()));
     await new Promise<void>((resolve) => tokenInfoServer.close(() => resolve()));

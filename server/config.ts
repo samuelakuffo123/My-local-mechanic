@@ -30,8 +30,13 @@ export const config = {
   port: Number(process.env.API_PORT ?? process.env.PORT ?? 8787),
   host: process.env.API_HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
 
-  // SQLite file for local/dev. In production point DATABASE_URL at Postgres
-  // through the storage adapter (see server/db.ts migration notes).
+  // Postgres (Neon) is used whenever DATABASE_URL is set. The pooled URL serves
+  // application traffic; the direct/unpooled URL runs migrations, because
+  // PgBouncer's transaction mode does not preserve session state.
+  databaseUrl: process.env.DATABASE_URL?.trim() ?? "",
+  databaseUrlUnpooled: process.env.DATABASE_URL_UNPOOLED?.trim() ?? "",
+
+  // SQLite file used for local development and the API tests.
   databasePath: process.env.DATABASE_PATH ?? ".data/mechnow.sqlite",
 
   // Comma-separated list of allowed browser origins.

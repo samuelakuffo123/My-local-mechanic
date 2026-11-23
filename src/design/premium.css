@@ -355,6 +355,240 @@ h3 {
   color: #aeb7e8;
 }
 
+/* Opening animation: a car arrives, then the mechanic joins it holding the
+   driver screen. The copy follows so the scene reads first. */
+.splash-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.splash-content {
+  position: relative;
+  z-index: 2;
+  transform: none;
+  align-self: center;
+  padding-bottom: max(26px, env(safe-area-inset-bottom));
+}
+
+.splash-skip {
+  z-index: 3;
+}
+
+.splash-brand {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 14px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, .08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18);
+  animation: splash-copy-in 520ms 880ms both;
+}
+
+.splash-brand .brand-logo__image {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.splash-kicker {
+  margin-bottom: 10px;
+  animation: splash-copy-in 500ms 960ms both;
+}
+
+.splash-wordmark {
+  margin-top: 0;
+  animation: splash-copy-in 620ms 1040ms both;
+}
+
+.splash-tagline {
+  animation: splash-copy-in 620ms 1160ms both;
+}
+
+.splash-loader {
+  animation: splash-copy-in 500ms 1280ms both;
+}
+
+.splash-location {
+  animation: splash-copy-in 500ms 1380ms both;
+}
+
+.splash-scene {
+  position: absolute;
+  z-index: 1;
+  top: 6%;
+  left: 0;
+  right: 0;
+  height: min(54vh, 430px);
+  pointer-events: none;
+}
+
+.splash-scene__road {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 64%;
+  height: 6px;
+  border-radius: 99px;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .3) 0 20px, transparent 20px 40px);
+  background-size: 40px 100%;
+  box-shadow: 0 0 24px rgba(124, 92, 255, .3);
+  animation: splash-road-flow 900ms linear infinite;
+}
+
+.splash-scene__road span {
+  position: absolute;
+  top: -3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(53, 237, 126, .75);
+  box-shadow: 0 0 14px rgba(53, 237, 126, .65);
+}
+
+.splash-scene__road span:nth-child(1) { left: 12%; }
+.splash-scene__road span:nth-child(2) { left: 52%; }
+.splash-scene__road span:nth-child(3) { left: 84%; }
+
+.splash-scene__car {
+  position: absolute;
+  left: 2%;
+  top: 31%;
+  width: min(48vw, 258px);
+  filter: drop-shadow(0 18px 26px rgba(4, 8, 32, .45));
+  animation: splash-car-drive 1150ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.splash-scene__mechanic {
+  position: absolute;
+  right: 5%;
+  bottom: 34%;
+  width: min(36vw, 188px);
+  opacity: 0;
+  filter: drop-shadow(0 18px 26px rgba(4, 8, 32, .45));
+  animation: splash-mechanic-in 760ms 900ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.splash-scene__link {
+  position: absolute;
+  left: 32%;
+  right: 28%;
+  top: 65%;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(53, 237, 126, .1), rgba(53, 237, 126, .9));
+  box-shadow: 0 0 12px rgba(53, 237, 126, .5);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: splash-route-draw 640ms 1220ms ease-out both;
+}
+
+.splash-scene__spark {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 16px 4px rgba(124, 92, 255, .7);
+  opacity: 0;
+  animation: splash-spark 1.4s ease-in-out 1600ms infinite;
+}
+
+.splash-scene__spark--one { left: 44%; top: 34%; }
+.splash-scene__spark--two {
+  right: 32%;
+  top: 26%;
+  width: 5px;
+  height: 5px;
+  animation-delay: 1850ms;
+}
+
+.splash-tablet {
+  animation: splash-tablet-glow 1.6s ease-in-out 1700ms infinite;
+}
+
+@keyframes splash-road-flow {
+  to { background-position: 40px 0; }
+}
+
+@keyframes splash-car-drive {
+  0% { opacity: 0; transform: translateX(-125%) translateY(6px); }
+  18% { opacity: 1; }
+  72% { transform: translateX(6%) translateY(0); }
+  88% { transform: translateX(-2%) translateY(0); }
+  100% { opacity: 1; transform: translateX(0) translateY(0); }
+}
+
+@keyframes splash-mechanic-in {
+  from { opacity: 0; transform: translate(40px, 26px) scale(.86); }
+  to { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+
+@keyframes splash-route-draw {
+  to { transform: scaleX(1); }
+}
+
+@keyframes splash-spark {
+  0%, 100% { opacity: 0; transform: scale(.6); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes splash-tablet-glow {
+  0%, 100% { filter: drop-shadow(0 0 0 rgba(53, 237, 126, 0)); }
+  50% { filter: drop-shadow(0 0 8px rgba(53, 237, 126, .65)); }
+}
+
+@media (max-width: 520px), (max-height: 640px) {
+  .splash-scene {
+    top: 7%;
+    height: 48vh;
+  }
+  .splash-scene__car {
+    left: 0;
+    width: min(52vw, 220px);
+  }
+  .splash-scene__mechanic {
+    right: 2%;
+    width: min(34vw, 150px);
+  }
+  .splash-content {
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+  .splash-brand {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 10px;
+  }
+  .splash-wordmark {
+    font-size: 30px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-brand,
+  .splash-kicker,
+  .splash-wordmark,
+  .splash-tagline,
+  .splash-loader,
+  .splash-location,
+  .splash-scene__car,
+  .splash-scene__mechanic,
+  .splash-scene__link,
+  .splash-scene__road,
+  .splash-scene__spark,
+  .splash-tablet {
+    animation-duration: .01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  .splash-scene__car,
+  .splash-scene__mechanic { opacity: 1; transform: none; }
+  .splash-scene__link { transform: scaleX(1); }
+}
+
 .onboarding-page {
   background-color: #ffffff !important;
 }

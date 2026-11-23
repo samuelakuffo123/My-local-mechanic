@@ -40,18 +40,32 @@ function validate(input: Partial<VehicleInput>) {
   }
 }
 
-export function listVehicles(userId: string) {
-  return all(
-    `SELECT id, owner_id as ownerId, make, model, year, plate, mileage_km as mileageKm, is_primary as isPrimary,
-            created_at as createdAt, updated_at as updatedAt
-     FROM vehicles WHERE owner_id = ? ORDER BY is_primary DESC, created_at ASC`,
-    [userId],
-  ).map((row) => ({ ...row, isPrimary: Boolean(row.isPrimary) }));
+export interface Vehicle {
+  id: string;
+  ownerId: string;
+  make: string;
+  model: string;
+  year: number;
+  plate: string;
+  mileageKm: number;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export function getVehicle(id: string) {
-  const row = get<Record<string, unknown>>(
-    `SELECT id, owner_id as ownerId, make, model, year, plate, mileage_km as mileageKm, is_primary as isPrimary
+export async function listVehicles(userId: string): Promise<Vehicle[]> {
+  const rows = await all<Vehicle>(
+    `SELECT id, owner_id as "ownerId", make, model, year, plate, mileage_km as "mileageKm", is_primary as "isPrimary",
+            created_at as "createdAt", updated_at as "updatedAt"
+     FROM vehicles WHERE owner_id = ? ORDER BY is_primary DESC, created_at ASC`,
+    [userId],
+  );
+  return rows.map((row) => ({ ...row, isPrimary: Boolean(row.isPrimary) }));
+}
+
+export async function getVehicle(id: string): Promise<Vehicle | null> {
+  const row = await get<Vehicle>(
+    `SELECT id, owner_id as "ownerId", make, model, year, plate, mileage_km as "mileageKm", is_primary as "isPrimary"
      FROM vehicles WHERE id = ?`,
     [id],
   );
@@ -61,37 +75,37 @@ export function getVehicle(id: string) {
 }
 
 /** Owner-scoped read: prevents anyone signed in from reading another user's vehicle. */
-export function getVehicleForUser(auth: AuthContext, id: string) {
-  const vehicle = getVehicle(id);
+export async function getVehicleForUser(auth: AuthContext, id: string) {
+  const vehicle = await getVehicle(id);
   if (!vehicle) throw notFound("Vehicle not found.");
   const ownerId = (vehicle as { ownerId?: string }).ownerId;
   if (ownerId !== auth.userId && auth.role !== "admin") throw forbidden();
   return vehicle;
 }
 
-export function createVehicle(auth: AuthContext, input: VehicleInput) {
+export async function createVehicle(auth: AuthContext, input: VehicleInput) {
   validate(input);
   const id = newId();
   const timestamp = nowIso();
   const isPrimary = wantsPrimary(input);
-  run(
+  await run(
     `INSERT INTO vehicles (id, owner_id, make, model, year, plate, mileage_km, is_primary, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, auth.userId, input.make.trim(), input.model.trim(), Math.round(Number(input.year)), input.plate.trim(), Math.round(input.mileageKm ?? 0), isPrimary ? 1 : 0, timestamp, timestamp],
   );
   if (isPrimary) {
-    run("UPDATE vehicles SET is_primary = 0 WHERE owner_id = ? AND id <> ?", [auth.userId, id]);
+    await run("UPDATE vehicles SET is_primary = 0 WHERE owner_id = ? AND id <> ?", [auth.userId, id]);
   }
-  return getVehicle(id);
+  return await getVehicle(id);
 }
 
-export function updateVehicle(auth: AuthContext, id: string, input: Partial<VehicleInput>) {
-  const existing = get<{ ownerId: string }>("SELECT owner_id as ownerId FROM vehicles WHERE id = ?", [id]);
+export async function updateVehicle(auth: AuthContext, id: string, input: Partial<VehicleInput>) {
+  const existing = await get<{ ownerId: string }>(`SELECT owner_id as "ownerId" FROM vehicles WHERE id = ?`, [id]);
   if (!existing) throw notFound("Vehicle not found.");
   if (existing.ownerId !== auth.userId && auth.role !== "admin") throw forbidden();
   validate({ ...input, make: input.make ?? "x", model: input.model ?? "x", plate: input.plate ?? "x", year: input.year ?? 2000 });
   const isPrimary = wantsPrimary(input);
-  run(
+  await run(
     `UPDATE vehicles SET make = COALESCE(?, make), model = COALESCE(?, model), year = COALESCE(?, year),
       plate = COALESCE(?, plate), mileage_km = COALESCE(?, mileage_km), is_primary = COALESCE(?, is_primary), updated_at = ?
      WHERE id = ?`,
@@ -106,18 +120,18 @@ export function updateVehicle(auth: AuthContext, id: string, input: Partial<Vehi
       id,
     ],
   );
-  if (isPrimary) run("UPDATE vehicles SET is_primary = 0 WHERE owner_id = ? AND id <> ?", [existing.ownerId, id]);
-  return getVehicle(id);
+  if (isPrimary) await run("UPDATE vehicles SET is_primary = 0 WHERE owner_id = ? AND id <> ?", [existing.ownerId, id]);
+  return await getVehicle(id);
 }
 
-export function deleteVehicle(auth: AuthContext, id: string) {
-  const existing = get<{ ownerId: string }>("SELECT owner_id as ownerId FROM vehicles WHERE id = ?", [id]);
+export async function deleteVehicle(auth: AuthContext, id: string) {
+  const existing = await get<{ ownerId: string }>(`SELECT owner_id as "ownerId" FROM vehicles WHERE id = ?`, [id]);
   if (!existing) throw notFound("Vehicle not found.");
   if (existing.ownerId !== auth.userId && auth.role !== "admin") throw forbidden();
   // service_requests.vehicle_id has no ON DELETE rule, so a plain delete would
   // hit a foreign-key error. Refuse rather than silently destroying history.
-  const used = Number(get<{ value: number }>("SELECT COUNT(*) as value FROM service_requests WHERE vehicle_id = ?", [id])?.value ?? 0);
+  const used = Number(await (await get<{ value: number }>(`SELECT COUNT(*) as "value" FROM service_requests WHERE vehicle_id = ?`, [id]))?.value ?? 0);
   if (used > 0) throw conflict("This vehicle has service history, so it cannot be deleted.");
-  run("DELETE FROM vehicles WHERE id = ?", [id]);
+  await run("DELETE FROM vehicles WHERE id = ?", [id]);
   return { deleted: true };
 }

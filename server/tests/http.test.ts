@@ -120,7 +120,7 @@ test("HTTP boundary: routing, auth, ownership and response shapes", async () => 
     });
     assert.equal(verified.status, 200);
     const token = verified.json.token as string;
-    assert.equal(verified.json.user.role, "driver");
+    assert.equal((verified.json.user as Record<string, unknown>).role, "driver");
 
     // --- Profile photos are scoped to the signed-in user and persist ---------
     const avatarUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2Q==";
@@ -198,7 +198,7 @@ test("HTTP boundary: routing, auth, ownership and response shapes", async () => 
     assert.equal(foreignMove.status, 403, "another customer cannot move someone else's request");
 
     // --- Provider credentials stay private -----------------------------------
-    const adminId = seed.ensureUser({ phone: "0200000000", name: "Root Admin", role: "admin", password: "admin-password-123" });
+    const adminId = await seed.ensureUser({ phone: "0200000000", name: "Root Admin", role: "admin", password: "admin-password-123" });
     const adminLogin = await call("/api/auth/login", { body: { phone: "0200000000", password: "admin-password-123" } });
     assert.equal(adminLogin.status, 200);
     const adminToken = adminLogin.json.token as string;

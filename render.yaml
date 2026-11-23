@@ -1,10 +1,10 @@
 # Render Blueprint: one HTTPS service serving the client bundle and /api.
-# The SQLite database lives on the mounted disk, so it survives deploys.
+# Data lives in Neon Postgres, so the free plan needs no persistent disk.
 services:
   - type: web
     name: mechnow
     runtime: node
-    plan: starter
+    plan: free
     region: frankfurt
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
@@ -18,8 +18,36 @@ services:
         value: 0.0.0.0
       - key: API_PORT
         value: "10000"
-      - key: DATABASE_PATH
-        value: /var/data/mechnow.sqlite
+      # Neon pooled connection string for application traffic.
+      - key: DATABASE_URL
+        sync: false
+      # Neon direct connection string, used only for migrations at boot.
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      # Other services declared in neon.ts. The app does not consume them yet;
+      # they are injected so `neon env pull` values are available at runtime.
+      - key: NEON_AUTH_BASE_URL
+        sync: false
+      - key: NEON_AUTH_JWKS_URL
+        sync: false
+      - key: NEON_FUNCTION_HOST_SUFFIX
+        sync: false
+      - key: NEON_AI_GATEWAY_BASE_URL
+        sync: false
+      - key: NEON_AI_GATEWAY_TOKEN
+        sync: false
+      - key: NEON_REALTIME_URL
+        sync: false
+      - key: NEON_REALTIME_SECRET
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_ENDPOINT_URL_S3
+        sync: false
+      - key: AWS_REGION
+        sync: false
       - key: TRUST_PROXY
         value: "true"
       - key: SEED_DEMO_DATA
@@ -42,7 +70,3 @@ services:
         sync: false
       - key: PAYSTACK_WEBHOOK_SECRET
         sync: false
-    disk:
-      name: mechnow-data
-      mountPath: /var/data
-      sizeGB: 1
