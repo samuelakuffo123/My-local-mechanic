@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, CarFront, MapPin, Route, ShieldCheck, type LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 
+import brakePhoto from "../../assets/brake.jpg";
+import corollaPhoto from "../../assets/corolla.jpg";
+import mechanicPhoto from "../../assets/mechanic.jpg";
+import towPhoto from "../../assets/tow.jpg";
+import tyrePhoto from "../../assets/tyre.jpg";
 import { BrandLogo } from "../../components/BrandLogo";
 import { DeviceFrame } from "../../components/DeviceFrame";
 import { useAppStore } from "../../state/store";
@@ -16,6 +21,9 @@ interface Slide {
   badge: string;
   chip: string;
   icon: LucideIcon;
+  photo: string;
+  photoAlt: string;
+  thumbnails: string[];
 }
 
 const SLIDES: Slide[] = [
@@ -27,6 +35,9 @@ const SLIDES: Slide[] = [
     badge: "LIVE LOCATION",
     chip: "Nearby pros",
     icon: CarFront,
+    photo: tyrePhoto,
+    photoAlt: "A car being assisted beside the road",
+    thumbnails: [towPhoto, corollaPhoto],
   },
   {
     key: "trusted",
@@ -36,6 +47,9 @@ const SLIDES: Slide[] = [
     badge: "UPFRONT PRICING",
     chip: "Verified",
     icon: ShieldCheck,
+    photo: mechanicPhoto,
+    photoAlt: "A local mechanic working on a vehicle",
+    thumbnails: [brakePhoto, corollaPhoto],
   },
   {
     key: "tracking",
@@ -45,6 +59,9 @@ const SLIDES: Slide[] = [
     badge: "LIVE TRACKING",
     chip: "Job updates",
     icon: Route,
+    photo: towPhoto,
+    photoAlt: "A recovery vehicle ready to help a driver",
+    thumbnails: [corollaPhoto, tyrePhoto],
   },
 ];
 
@@ -106,23 +123,35 @@ export function OnboardingScreen() {
         </div>
 
         <section className="onboarding-stage" aria-live="polite">
-          <div className={`onboarding-visual onboarding-visual--${slide.key}`}>
+          <div className={`onboarding-visual onboarding-visual--${slide.key}`} key={slide.key}>
+            <img
+              alt={slide.photoAlt}
+              className="onboarding-visual__photo"
+              decoding="async"
+              src={slide.photo}
+            />
+            <div aria-hidden="true" className="onboarding-visual__shade" />
             <div aria-hidden="true" className="onboarding-visual__grid" />
             <div aria-hidden="true" className="onboarding-visual__route" />
             <span aria-hidden="true" className="onboarding-visual__waypoint onboarding-visual__waypoint--start" />
             <span aria-hidden="true" className="onboarding-visual__waypoint onboarding-visual__waypoint--end" />
-            <div aria-hidden="true" className="onboarding-visual__ring onboarding-visual__ring--outer" />
-            <div aria-hidden="true" className="onboarding-visual__ring onboarding-visual__ring--inner" />
+            <div aria-hidden="true" className="onboarding-visual__thumbs">
+              {slide.thumbnails.map((thumbnail, index) => (
+                <img alt="" decoding="async" key={`${slide.key}-${index}`} src={thumbnail} />
+              ))}
+            </div>
             <div className="onboarding-visual__icon">
-              <Icon aria-hidden="true" size={52} strokeWidth={1.8} />
+              <Icon aria-hidden="true" size={24} strokeWidth={2} />
             </div>
             <span className="onboarding-chip onboarding-chip--top">
               <MapPin aria-hidden="true" size={13} /> {slide.chip}
             </span>
-            <span className="onboarding-chip onboarding-chip--bottom">{slide.badge}</span>
+            <span className="onboarding-chip onboarding-chip--bottom">
+              <span aria-hidden="true" className="onboarding-chip__dot" /> {slide.badge}
+            </span>
           </div>
 
-          <div className="onboarding-copy" key={slide.key}>
+          <div className="onboarding-copy" key={`${slide.key}-copy`}>
             <span className="onboarding-kicker">{slide.kicker}</span>
             <h1 className="onboarding-title" ref={headingRef} tabIndex={-1}>
               {slide.title}

@@ -6,13 +6,17 @@ import { useNavigate } from "react-router"
 
 import { AppLayout } from "../../components/AppLayout"
 import { BrandLogo } from "../../components/BrandLogo"
+import brakePhoto from "../../assets/brake.jpg"
 import carPhoto from "../../assets/corolla.jpg"
+import towPhoto from "../../assets/tow.jpg"
+import tyrePhoto from "../../assets/tyre.jpg"
 
-import { vehicleService } from "../../services/vehicles"
 import { errorMessage } from "../../services/errorMessage"
+import { vehicleService } from "../../services/vehicles"
 
 import { useAppStore } from "../../state/store"
 import { completeProfileSetup } from "./onboardingState"
+import "./vehicle-onboarding.css"
 
 export function VehicleOnboarding() {
   const theme = useAppStore((state) => state.theme)
@@ -42,6 +46,12 @@ export function VehicleOnboarding() {
 
     if (!make.trim() || !model.trim()) {
       setError("Enter your vehicle make and model.")
+
+      return
+    }
+
+    if (!plate.trim()) {
+      setError("Enter your vehicle number plate.")
 
       return
     }
@@ -110,22 +120,38 @@ export function VehicleOnboarding() {
           <BrandLogo />
           <span>1 minute setup</span>
         </header>
+
         <section className="vehicle-onboarding__hero">
           <div className="vehicle-onboarding__progress" aria-label="Step 1 of 1">
             <span />
           </div>
-          <div className="vehicle-onboarding__illustration">
-            <img alt="" aria-hidden="true" src={carPhoto} />
-            <span className="vehicle-onboarding__image-badge"><CarFront size={17} /> YOUR GARAGE</span>
+
+          <div className="vehicle-onboarding__gallery">
+            <div className="vehicle-onboarding__illustration">
+              <img
+                alt="White sedan parked in a bright garage"
+                decoding="async"
+                src={carPhoto}
+              />
+              <span className="vehicle-onboarding__image-badge"><CarFront size={17} /> YOUR GARAGE</span>
+            </div>
+            <div aria-hidden="true" className="vehicle-onboarding__photo-strip">
+              <img alt="" decoding="async" loading="lazy" src={tyrePhoto} />
+              <img alt="" decoding="async" loading="lazy" src={brakePhoto} />
+              <img alt="" decoding="async" loading="lazy" src={towPhoto} />
+            </div>
           </div>
-          <span className="auth-kicker">LET'S GET YOU ON THE ROAD</span>
-          <h1>First, tell us about your car.</h1>
-          <p className="vehicle-onboarding__intro">
-            We’ll use these details to make your service requests easier. You can update them any time.
-          </p>
+
+          <div className="vehicle-onboarding__intro-copy">
+            <span className="vehicle-onboarding__kicker">LET'S GET YOU ON THE ROAD</span>
+            <h1>First, tell us about your car.</h1>
+            <p className="vehicle-onboarding__intro">
+              We’ll use these details to make your service requests easier. You can update them any time.
+            </p>
+          </div>
         </section>
 
-        <form className="vehicle-onboarding__form" onSubmit={finish}>
+        <form className="vehicle-onboarding__form" noValidate onSubmit={finish}>
           <div className="vehicle-onboarding__form-heading">
             <span><CarFront size={19} /></span>
             <div><strong>Vehicle details</strong><small>Required fields are marked</small></div>
@@ -134,7 +160,7 @@ export function VehicleOnboarding() {
             <span>Make <i>Required</i></span>
             <input
               autoComplete="off"
-              maxLength={40}
+              maxLength={60}
               onChange={(event) => setMake(event.target.value)}
               placeholder="e.g. Toyota"
               required
@@ -145,7 +171,7 @@ export function VehicleOnboarding() {
             <span>Model <i>Required</i></span>
             <input
               autoComplete="off"
-              maxLength={40}
+              maxLength={60}
               onChange={(event) => setModel(event.target.value)}
               placeholder="e.g. Corolla"
               required
@@ -156,6 +182,7 @@ export function VehicleOnboarding() {
             <label>
               <span>Year <i>Required</i></span>
               <input
+                inputMode="numeric"
                 max={new Date().getFullYear() + 1}
                 min="1950"
                 onChange={(event) => setYear(event.target.value)}
@@ -169,6 +196,7 @@ export function VehicleOnboarding() {
               <div className="vehicle-onboarding__input-icon">
                 <Gauge size={15} aria-hidden="true" />
                 <input
+                  inputMode="numeric"
                   min="0"
                   onChange={(event) => setMileage(event.target.value)}
                   placeholder="Optional"
@@ -179,22 +207,21 @@ export function VehicleOnboarding() {
             </label>
           </div>
           <label>
-            <span>
-              Number plate <small>Optional</small>
-            </span>
+            <span>Number plate <i>Required</i></span>
             <div className="vehicle-onboarding__input-icon">
               <Hash size={15} aria-hidden="true" />
               <input
                 autoCapitalize="characters"
-                maxLength={16}
+                maxLength={20}
                 onChange={(event) => setPlate(event.target.value)}
                 placeholder="e.g. GR 1234-24"
+                required
                 value={plate}
               />
             </div>
           </label>
           {error && (
-            <p className="auth-error" role="alert">
+            <p className="auth-error" id="vehicle-onboarding-error" role="alert">
               {error}
             </p>
           )}
@@ -202,6 +229,7 @@ export function VehicleOnboarding() {
             {saving ? "Saving your car…" : "Save and continue"} <ArrowRight size={17} />
           </button>
         </form>
+
         <button className="vehicle-onboarding__skip" onClick={skip} type="button">
           <SkipForward size={15} /> I’ll do this later
         </button>
