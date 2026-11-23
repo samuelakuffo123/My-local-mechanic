@@ -248,6 +248,7 @@ h3 { font-size: 15px; line-height: 1.35; }
 }
 [data-theme="light"] .auth-card p,
 [data-theme="light"] .auth-form label,
+[data-theme="light"] .auth-form .auth-role-field,
 [data-theme="light"] .auth-divider,
 [data-theme="light"] .auth-meta span {
   color: var(--text-2);
@@ -1714,12 +1715,39 @@ h3 { font-size: 15px; line-height: 1.35; }
   display: grid;
   gap: 18px;
 }
-.auth-form label {
+.auth-form label,
+.auth-form .auth-role-field {
   display: grid;
   gap: 10px;
   color: #dfe9ff;
   font-size: 13px;
   font-weight: 700;
+}
+.auth-role-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.auth-role-grid button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-1);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 150ms, background-color 150ms, color 150ms;
+}
+.auth-role-grid button:hover {
+  border-color: var(--brand);
+}
+.auth-role-grid button.selected {
+  border-color: var(--brand);
+  background: var(--brand-subtle);
+  color: var(--text);
 }
 .auth-input-wrap {
   display: flex;

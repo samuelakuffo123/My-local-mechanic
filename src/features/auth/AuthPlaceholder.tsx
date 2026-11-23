@@ -232,11 +232,12 @@ export function AuthPlaceholder() {
               </label>
 
               {view === "signup" && (
-                <label>
-                  <span>I am a</span>
-                  <div className="auth-role-grid">
+                <div className="auth-role-field">
+                  <span id="auth-role-label">I am a</span>
+                  <div aria-labelledby="auth-role-label" className="auth-role-grid" role="group">
                     {ROLES.map((option) => (
                       <button
+                        aria-pressed={role === option.value}
                         className={role === option.value ? "selected" : ""}
                         key={option.value}
                         onClick={() => setRole(option.value)}
@@ -247,7 +248,7 @@ export function AuthPlaceholder() {
                       </button>
                     ))}
                   </div>
-                </label>
+                </div>
               )}
 
               <button className="auth-submit" disabled={busy} type="submit">

@@ -770,6 +770,7 @@ h3 {
 
 [data-theme="light"] .auth-card p,
 [data-theme="light"] .auth-form label,
+[data-theme="light"] .auth-form .auth-role-field,
 [data-theme="light"] .auth-divider,
 [data-theme="light"] .auth-meta span {
   color: var(--text-2);
