@@ -90,7 +90,7 @@ h3 {
 /* Raise legacy micro-labels to a readable floor without flattening hierarchy.
    Route chunks can load after this file, so !important keeps the floor stable. */
 :is(.phone-frame, .screen, .app-layout, .d-root, .s2-screen, .auth-page, .onboarding-page)
-  :is(p, span, small, strong, em, i, b, button, label, input, th, td, time, dt, dd, kbd):not(.pw-root, .pw-root *, .auth-page *, .auth-screen *) {
+  :is(p, span, small, strong, em, i, b, button, label, input, th, td, time, dt, dd, kbd):not(.pw-root, .pw-root *, .auth-page *, .auth-screen *, .em-screen *, .em-hero *, .em-greeting *) {
   font-size: max(11px, 1em) !important;
 }
 

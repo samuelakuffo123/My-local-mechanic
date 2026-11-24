@@ -68,6 +68,8 @@ import type { User } from "../../state/types";
 import { LiveMap } from "../../components/LiveMap";
 import { useGeolocation, type GeoPoint } from "../../hooks/useGeolocation";
 import { useNearbyProviders } from "../../hooks/useNearbyProviders";
+import { EmergencyHero } from "../emergency/EmergencyHero";
+import { EmergencyRequestScreen } from "../emergency/EmergencyRequestScreen";
 import { getDrivingRoute } from "../../services/directions";
 import { errorMessage } from "../../services/errorMessage";
 import { displayFirstName, displayName, isPlaceholderName } from "../../utils/displayName";
@@ -137,13 +139,8 @@ type Screen =
   | "complete";
 
 function screenForEmergency(status?: EmergencyStatus): Screen {
-  if (!status || status === "idle" || status === "choosingProblem") return "need";
-  if (status === "locating") return "location";
-  if (status === "searching" || status === "providerDeclined" || status === "offline") return "searching";
-  if (status === "results" || status === "noProvider") return "results";
-  if (status === "confirming") return "confirm";
-  if (status === "requested") return "sent";
-  if (["matched", "enRoute", "nearby"].includes(status)) return "tracking";
+  if (!status || ["idle", "choosingProblem", "locating", "searching", "results", "confirming", "providerDeclined", "noProvider", "offline"].includes(status)) return "need";
+  if (["requested", "matched", "enRoute", "nearby"].includes(status)) return "tracking";
   if (["arrived", "diagnosing"].includes(status)) return "arrived";
   if (["awaitingApproval", "repairing", "awaitingParts"].includes(status)) return "estimate";
   if (["completed", "paying"].includes(status)) return "payment";
@@ -158,26 +155,6 @@ type Scenario =
   | "no-provider"
   | "location-denied"
   | "offline";
-
-type Problem = {
-  label: string;
-  icon: LucideIcon;
-  description?: string;
-  urgent?: boolean;
-};
-
-const problems: Problem[] = [
-  { label: "Car won't start", icon: Zap },
-  { label: "Flat tire", icon: LifeBuoy },
-  { label: "Engine problem", icon: Wrench },
-  { label: "Dead battery", icon: BatteryCharging },
-  { label: "Overheating", icon: Thermometer },
-  { label: "Fuel problem", icon: Fuel },
-  { label: "Accident", icon: TriangleAlert, urgent: true },
-  { label: "Warning light", icon: CircleAlert },
-  { label: "Locked out", icon: Car },
-  { label: "I don't know", icon: MoreHorizontal, description: "We'll help you figure it out" },
-];
 
 const screenSteps: Partial<Record<Screen, number>> = {
   need: 1,
@@ -325,37 +302,6 @@ function BottomNav({
   );
 }
 
-function EmergencySlider({ onComplete }: { onComplete: () => void }) {
-  const [value, setValue] = useState(0);
-  const finish = () => {
-    if (value >= 86) {
-      setValue(100);
-      window.setTimeout(onComplete, 120);
-    } else {
-      setValue(0);
-    }
-  };
-  return (
-    <div className="emergency-slider" style={{ "--slide-progress": `${value}%` } as React.CSSProperties}>
-      <input
-        aria-label="Slide to request emergency help"
-        max="100"
-        min="0"
-        onChange={(event) => setValue(Number(event.target.value))}
-        onKeyUp={finish}
-        onPointerUp={finish}
-        type="range"
-        value={value}
-      />
-      <span className="emergency-slider__track" aria-hidden="true">
-        <i><ArrowRight size={18} /></i>
-        <strong>{value >= 86 ? "Release to confirm" : "Slide for emergency help"}</strong>
-        <ShieldCheck size={16} />
-      </span>
-    </div>
-  );
-}
-
 function providerKindMeta(type: NearbyProvider["type"]) {
   if (type === "tow") return { label: "Tow", icon: Truck, tone: "tow" as const, start: "tow" as DriverFeatureStart };
   if (type === "vendor") return { label: "Shop", icon: ShoppingBag, tone: "shop" as const, start: "parts" as DriverFeatureStart };
@@ -468,10 +414,10 @@ function HomeScreen({
   }, []);
 
   const onlineCount = nearby.items.filter((provider) => provider.available).length;
-  const greeting = new Date().getHours() < 12 ? "GOOD MORNING" : new Date().getHours() < 18 ? "GOOD AFTERNOON" : "GOOD EVENING";
   const openProvider = (provider: NearbyProvider) => {
     navigate(provider.id ? `/app/explore?provider=${encodeURIComponent(provider.id)}` : "/app/explore");
   };
+  const emergencyActive = activeRequest?.kind === "emergency";
   const activeLabel = activeRequest ? liveStatusCopy[activeRequest.status] ?? "Live update" : "";
 
   return (
@@ -488,18 +434,9 @@ function HomeScreen({
       />
 
       <main className="home-content">
-        <section className="welcome">
-          <p className="eyebrow">{greeting}</p>
-          <h1>Ready for the road, {firstName}?</h1>
-          <p>
-            {nearby.loading
-              ? "Checking who is around you…"
-              : onlineCount > 0
-                ? `${onlineCount} verified ${onlineCount === 1 ? "provider" : "providers"} online near you.`
-                : vehicle
-                  ? `Your ${vehicle.model} is in good shape. Help is one tap away.`
-                  : "Add a vehicle to get personalised maintenance guidance."}
-          </p>
+        <section className="em-greeting">
+          <h1>Hi, {firstName}</h1>
+          {onlineCount > 0 && <p>{onlineCount} verified {onlineCount === 1 ? "provider" : "providers"} online near you.</p>}
           {needsName && (
             <button className="welcome-name-link" onClick={onProfile} type="button">
               Add your name so we can greet you properly <ChevronRight size={14} />
@@ -507,7 +444,7 @@ function HomeScreen({
           )}
         </section>
 
-        {activeRequest && (
+        {activeRequest && !emergencyActive && (
           <section className="home-live-card" aria-label="Active request">
             <span className="home-live-card__tag"><span className="live-dot" /> LIVE REQUEST · {activeRequest.ref}</span>
             <div className="home-live-card__body">
@@ -522,6 +459,29 @@ function HomeScreen({
             <span className="home-live-card__rail" aria-hidden="true" />
           </section>
         )}
+
+        <section className="quick-section">
+          <div className="section-heading">
+            <div>
+              <span className="overline">SERVICES</span>
+              <h2>What do you need?</h2>
+            </div>
+          </div>
+          <div className="quick-grid">
+            {[
+              { label: "Find mechanic", helper: "Mechanics nearby", icon: Search, start: "explore" as DriverFeatureStart },
+              { label: "Book service", helper: "Pick a time", icon: Clock3, start: "booking" as DriverFeatureStart },
+              { label: "Request tow", helper: "Flatbed or standard", icon: Truck, start: "tow" as DriverFeatureStart },
+              { label: "Find parts", helper: "Shops near you", icon: ShoppingBag, start: "parts" as DriverFeatureStart },
+            ].map(({ label, helper, icon: Icon, start }, index) => (
+              <button key={label} onClick={() => onNavigate(start)} style={{ "--tile-index": index } as React.CSSProperties} type="button">
+                <span><Icon size={25} strokeWidth={1.75} /></span>
+                <strong>{label}</strong>
+                <small>{helper}</small>
+              </button>
+            ))}
+          </div>
+        </section>
 
         <section className="vehicle-card">
           <div className="vehicle-card__top">
@@ -540,32 +500,14 @@ function HomeScreen({
               {vehicle && <span className="ghana-plate"><i>GH</i> {vehicle.plate}</span>}
               <p>{vehicle ? `${vehicle.year} LE · ${vehicle.mileageKm.toLocaleString()} km` : "Set up your vehicle profile"}</p>
             </div>
-            <div className="health-ring"><span><strong>82%</strong><small>healthy</small></span><i /></div>
-          </div>
-          <div className="vehicle-card__meta">
-            <div><span>Service due in 1,820 km</span><strong>82%</strong></div>
-            <i><b /></i>
           </div>
         </section>
 
-        <section className="emergency-card">
-          <div className="emergency-card__header">
-            <span className="emergency-card__icon"><LifeBuoy size={23} strokeWidth={1.75} /></span>
-            <span className="emergency-card__copy">
-              <strong>Emergency help</strong>
-              <small><i className="live-dot" /> {onlineCount > 0 ? `${onlineCount} providers within 45 km` : "Verified providers across Accra"}</small>
-            </span>
-            <button
-              onClick={() => {
-                window.location.href = "tel:+233241234567";
-              }}
-              type="button"
-            >
-              <Phone size={14} /> Call support
-            </button>
-          </div>
-          <EmergencySlider onComplete={onEmergency} />
-        </section>
+        <EmergencyHero
+          onRequest={onEmergency}
+          onTrack={emergencyActive && activeRequest ? () => navigate(`/app/track/${activeRequest.id}`) : undefined}
+          providersOnline={onlineCount}
+        />
 
         <section className="nearby-section">
           <div className="section-heading">
@@ -595,29 +537,6 @@ function HomeScreen({
             {geo.point && <span className="nearby-map-card__you"><span className="live-dot" /> Your location</span>}
           </div>
           <NearbyProviders items={nearby.items.slice(0, 5)} loading={nearby.loading} onOpen={openProvider} />
-        </section>
-
-        <section className="quick-section">
-          <div className="section-heading">
-            <div>
-              <span className="overline">SERVICES</span>
-              <h2>What do you need?</h2>
-            </div>
-          </div>
-          <div className="quick-grid">
-            {[
-              { label: "Find mechanic", helper: "Mechanics nearby", icon: Search, start: "explore" as DriverFeatureStart },
-              { label: "Book service", helper: "Pick a time", icon: Clock3, start: "booking" as DriverFeatureStart },
-              { label: "Request tow", helper: "Flatbed or standard", icon: Truck, start: "tow" as DriverFeatureStart },
-              { label: "Find parts", helper: "Shops near you", icon: ShoppingBag, start: "parts" as DriverFeatureStart },
-            ].map(({ label, helper, icon: Icon, start }, index) => (
-              <button key={label} onClick={() => onNavigate(start)} style={{ "--tile-index": index } as React.CSSProperties} type="button">
-                <span><Icon size={25} strokeWidth={1.75} /></span>
-                <strong>{label}</strong>
-                <small>{helper}</small>
-              </button>
-            ))}
-          </div>
         </section>
       </main>
       <BottomNav onEmergency={onEmergency} onHome={() => undefined} onNavigate={onNavigate} onProfile={onProfile} />
@@ -990,334 +909,6 @@ function ProfileScreen({
   );
 }
 
-function NeedScreen({
-  selected,
-  onSelect,
-  onBack,
-  onContinue,
-}: {
-  selected: string;
-  onSelect: (value: string) => void;
-  onBack: () => void;
-  onContinue: () => void;
-}) {
-  const accident = selected === "Accident";
-  return (
-    <div className="screen">
-      <AppHeader onBack={onBack} step={1} />
-      <main className="flow-content">
-        <div className="flow-heading">
-          <span className="signal-label"><span /> EMERGENCY HELP</span>
-          <h1>What do you need help with?</h1>
-          <p>Choose the closest match. You can explain more to your provider.</p>
-        </div>
-        {accident && (
-          <div className="notice notice--warning">
-            <TriangleAlert size={20} />
-            <div>
-              <strong>Is anyone in immediate danger?</strong>
-              <p>Contact Ghana emergency services first. MechNow is not a replacement for emergency services.</p>
-              <button onClick={() => { window.location.href = "tel:112"; }} type="button">Call 112</button>
-            </div>
-          </div>
-        )}
-        <div className="problem-grid" role="radiogroup" aria-label="Type of vehicle problem">
-          {problems.map(({ label, icon: Icon, description }) => (
-            <button
-              aria-checked={selected === label}
-              className={selected === label ? "selected" : ""}
-              key={label}
-              onClick={() => onSelect(label)}
-              role="radio"
-              type="button"
-            >
-              <span className="problem-icon"><Icon size={22} strokeWidth={1.75} /></span>
-              <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
-              <span className="radio-mark">{selected === label && <Check size={13} />}</span>
-            </button>
-          ))}
-        </div>
-        <button className="other-problem" onClick={() => onSelect("Other")} type="button">
-          <span><Menu size={20} /> Something else</span>
-          <ArrowRight size={18} />
-        </button>
-      </main>
-      <div className="sticky-action">
-        <Button disabled={!selected} onClick={onContinue}>Continue</Button>
-        <p>No payment is made until you confirm a provider.</p>
-      </div>
-    </div>
-  );
-}
-
-function LocationScreen({
-  onBack,
-  onContinue,
-  onDenied,
-  location,
-  loading,
-  error,
-  onRefresh,
-}: {
-  onBack: () => void;
-  onContinue: () => void;
-  onDenied: () => void;
-  location: GeoPoint | null;
-  loading: boolean;
-  error: string | null;
-  onRefresh: () => void;
-}) {
-  const coordsLabel = location ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}` : "Location not confirmed yet";
-  const placeLabel = location?.label?.trim() || "Current location";
-  return (
-    <div className="screen">
-      <AppHeader onBack={onBack} step={2} />
-      <main className="flow-content location-layout">
-        <div className="flow-heading">
-          <span className="signal-label signal-label--blue"><LocateFixed size={13} /> YOUR LOCATION</span>
-          <h1>Where should we send help?</h1>
-          <p>We'll only share your live location with your assigned provider.</p>
-        </div>
-        <div className="location-map">
-          <LiveMap user={location ? { lat: location.lat, lng: location.lng, label: placeLabel, kind: "user" } : null} height={235} followUser />
-        </div>
-        <div className="location-card">
-          <div className="location-card__icon"><MapPin size={20} /></div>
-          <div className="location-meta">
-            <span className="overline">DETECTED LOCATION</span>
-            <strong>{loading ? "Detecting your location…" : placeLabel}</strong>
-            <p>{coordsLabel}</p>
-            {error && <p className="location-status location-status--error">{error}</p>}
-            {!error && location && <p className="location-status">Live GPS location ready to share for this request.</p>}
-          </div>
-          <button onClick={onRefresh} type="button">Refresh</button>
-        </div>
-        <button className="manual-location" onClick={onDenied} type="button">
-          <Search size={18} />
-          <span>Enter location manually</span>
-          <ArrowRight size={17} />
-        </button>
-        <div className="privacy-note"><ShieldCheck size={17} /><span>Your precise location is encrypted and only used for this request.</span></div>
-      </main>
-      <div className="sticky-action">
-        <Button icon={LocateFixed} onClick={onContinue} disabled={!location || loading}>Use this location</Button>
-      </div>
-    </div>
-  );
-}
-
-function SearchingScreen({ onCancel, onFound }: { onCancel: () => void; onFound: () => void }) {
-  useEffect(() => {
-    const timer = window.setTimeout(onFound, 2400);
-    return () => window.clearTimeout(timer);
-  }, [onFound]);
-  return (
-    <div className="screen searching-screen">
-      <AppHeader title="Finding help" />
-      <main>
-        <div className="search-radar" aria-label="Searching for providers nearby">
-          <span className="radar-ring radar-ring--one" />
-          <span className="radar-ring radar-ring--two" />
-          <span className="radar-ring radar-ring--three" />
-          <span className="provider-dot provider-dot--one"><Wrench size={13} /></span>
-          <span className="provider-dot provider-dot--two"><Wrench size={13} /></span>
-          <span className="provider-dot provider-dot--three"><Car size={13} /></span>
-          <span className="search-radar__center"><Navigation size={22} fill="currentColor" /></span>
-        </div>
-        <div className="searching-copy">
-          <span className="signal-label"><span /> SEARCHING LIVE</span>
-          <h1>Finding available help near you…</h1>
-          <p>Checking verified providers for the best mix of speed, rating, and price.</p>
-        </div>
-        <div className="search-checks">
-          <span className="done"><Check size={15} /> Location confirmed</span>
-          <span className="active"><RefreshCw size={15} /> Checking availability</span>
-          <span><Clock3 size={15} /> Comparing arrival times</span>
-        </div>
-      </main>
-      <div className="searching-footer">
-        <p><ShieldCheck size={16} /> Your request hasn't been sent yet</p>
-        <Button onClick={onCancel} variant="ghost">Cancel search</Button>
-      </div>
-    </div>
-  );
-}
-
-const providers = [
-  { name: "Kojo AutoCare", initials: "KA", eta: "8 min", distance: "2.4 km", rating: "4.9", jobs: "312", price: "GHS 120", recommended: true },
-  { name: "Nii's Mobile Garage", initials: "NG", eta: "12 min", distance: "3.1 km", rating: "4.8", jobs: "186", price: "GHS 100", recommended: false },
-];
-
-function ProviderResults({
-  onBack,
-  onSelect,
-}: {
-  onBack: () => void;
-  onSelect: () => void;
-}) {
-  return (
-    <div className="screen">
-      <AppHeader onBack={onBack} title="Available help" />
-      <main className="flow-content results-content">
-        <div className="results-heading">
-          <div><span className="signal-label signal-label--green"><span /> 6 AVAILABLE NOW</span><h1>Help is close</h1></div>
-          <button onClick={() => window.location.href = "/app/explore"} type="button"><Menu size={16} /> Filter</button>
-        </div>
-        <div className="route-summary"><MapPin size={17} /><span><strong>Oxford Street, Osu</strong><small>Car won't start · Toyota Corolla</small></span><button onClick={() => window.location.href = "/app/location"} type="button">Edit</button></div>
-        <div className="provider-list">
-          {providers.map((provider) => (
-            <article className={`provider-card ${provider.recommended ? "provider-card--selected" : ""}`} key={provider.name}>
-              {provider.recommended && <span className="recommended"><Zap size={12} fill="currentColor" /> BEST MATCH</span>}
-              <div className="provider-card__header">
-                <div className="provider-avatar">{provider.initials}</div>
-                <div className="provider-identity">
-                  <div><h2>{provider.name}</h2><ShieldCheck size={17} fill="currentColor" /></div>
-                  <p><Star size={14} fill="currentColor" /> {provider.rating} <span>({provider.jobs} jobs)</span></p>
-                </div>
-                <IconButton label={`More about ${provider.name}`} icon={MoreHorizontal} />
-              </div>
-              <div className="provider-stats">
-                <div><span>ETA</span><strong>{provider.eta}</strong></div>
-                <div><span>DISTANCE</span><strong>{provider.distance}</strong></div>
-                <div><span>STARTING AT</span><strong>{provider.price}</strong></div>
-              </div>
-              <div className="provider-card__footer">
-                <span><span className="live-dot" /> Available now</span>
-                <button onClick={onSelect} type="button">Choose provider <ArrowRight size={16} /></button>
-              </div>
-            </article>
-          ))}
-        </div>
-      </main>
-    </div>
-  );
-}
-
-function HoldToConfirm({ onComplete }: { onComplete: () => void }) {
-  const [holding, setHolding] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const interval = useRef<number | null>(null);
-
-  const stop = () => {
-    if (interval.current) window.clearInterval(interval.current);
-    interval.current = null;
-    setHolding(false);
-    setProgress(0);
-  };
-
-  const start = () => {
-    if (interval.current) return;
-    setHolding(true);
-    const started = Date.now();
-    interval.current = window.setInterval(() => {
-      const next = Math.min(((Date.now() - started) / 1200) * 100, 100);
-      setProgress(next);
-      if (next >= 100) {
-        if (interval.current) window.clearInterval(interval.current);
-        interval.current = null;
-        setHolding(false);
-        onComplete();
-      }
-    }, 30);
-  };
-
-  useEffect(() => () => {
-    if (interval.current) window.clearInterval(interval.current);
-  }, []);
-
-  return (
-    <button
-      aria-label="Hold for one second to confirm and request help"
-      className={`hold-button ${holding ? "holding" : ""}`}
-      onPointerCancel={stop}
-      onPointerDown={start}
-      onPointerLeave={stop}
-      onPointerUp={() => progress < 100 && stop()}
-      type="button"
-    >
-      <span className="hold-button__fill" style={{ width: `${progress}%` }} />
-      <span className="hold-button__icon"><ArrowRight size={20} /></span>
-      <span>{holding ? "Keep holding…" : "Hold to request help"}</span>
-      <ShieldCheck size={18} />
-    </button>
-  );
-}
-
-function ConfirmScreen({
-  onBack,
-  onConfirm,
-  problem,
-  locationLabel,
-  vehicle,
-}: {
-  onBack: () => void;
-  onConfirm: () => void;
-  problem: string;
-  locationLabel: string;
-  vehicle: { make: string; model: string; plate: string } | null;
-}) {
-  const vehicleLabel = vehicle ? `${vehicle.make} ${vehicle.model} · ${vehicle.plate}` : "No vehicle selected";
-  return (
-    <div className="screen">
-      <AppHeader onBack={onBack} title="Confirm request" />
-      <main className="flow-content confirm-content">
-        <div className="provider-hero">
-          <div className="provider-avatar provider-avatar--large">MN</div>
-          <span className="verified-chip"><ShieldCheck size={14} fill="currentColor" /> REQUEST DETAILS</span>
-          <h1>Confirm your help request</h1>
-          <p>We'll share these details with nearby verified providers.</p>
-        </div>
-        <section className="eta-panel">
-          <span className="eta-panel__icon"><Navigation size={22} fill="currentColor" /></span>
-          <div><span>LIVE LOCATION</span><strong>Ready to share</strong><small>{locationLabel}</small></div>
-          <span className="live-dot" />
-        </section>
-        <section className="request-details">
-          <h2>Request details</h2>
-          <dl>
-            <div><dt><CircleAlert size={17} /> Problem</dt><dd>{problem || "Emergency assistance requested"}</dd></div>
-            <div><dt><Car size={17} /> Vehicle</dt><dd>{vehicleLabel}</dd></div>
-            <div><dt><MapPin size={17} /> Location</dt><dd>{locationLabel}</dd></div>
-          </dl>
-        </section>
-        <section className="price-panel">
-          <div><span>Pricing</span><strong>Shown before approval</strong></div>
-          <p>Any call-out, diagnosis, or repair cost must be confirmed before you approve payment.</p>
-        </section>
-        <div className="assurance-row"><ShieldCheck size={18} /><span><strong>No surprise charges</strong><small>Price changes always need your approval.</small></span></div>
-      </main>
-      <div className="sticky-action sticky-action--dark">
-        <HoldToConfirm onComplete={onConfirm} />
-        <p>Keep holding for 1 second to prevent accidental requests.</p>
-      </div>
-    </div>
-  );
-}
-
-function SentScreen({ onContinue }: { onContinue: () => void }) {
-  useEffect(() => {
-    const timer = window.setTimeout(onContinue, 1800);
-    return () => window.clearTimeout(timer);
-  }, [onContinue]);
-  return (
-    <div className="screen centered-state">
-      <AppHeader />
-      <main>
-        <div className="success-orbit"><Check size={32} /><span /></div>
-        <span className="signal-label signal-label--green"><span /> REQUEST SENT</span>
-        <h1>Your request is on its way.</h1>
-        <p>We're connecting you with Kojo AutoCare now. This usually takes less than a minute.</p>
-        <div className="connecting-card">
-          <div className="provider-avatar">KA</div>
-          <div><strong>Kojo AutoCare</strong><span>Confirming your request…</span></div>
-          <RefreshCw className="spin" size={19} />
-        </div>
-      </main>
-      <div className="centered-state__footer"><ShieldCheck size={16} /> You won't be charged until service begins.</div>
-    </div>
-  );
-}
-
 function SafetyActions({ onCancel }: { onCancel: () => void }) {
   return (
     <section className="safety-actions">
@@ -1378,7 +969,7 @@ function TrackingScreen({
   };
   const steps = ["accepted", "enRoute", "arrived"];
   const currentIndex = Math.max(0, steps.indexOf(status));
-  const title = status === "accepted" ? "Provider confirmed" : status === "arrived" ? "Provider has arrived" : "Help is on the way";
+  const title = status === "requested" ? "Finding your provider" : status === "accepted" ? "Provider confirmed" : status === "arrived" ? "Provider has arrived" : "Help is on the way";
   const locationLabel = request?.location.label || userLocation?.label || "Your current location";
   const providerName = request?.provider?.businessName || "Assigned provider";
 
@@ -1638,13 +1229,18 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
   const navigate = useNavigate();
   const [screen, setScreen] = useState<Screen>(() => initialScreen === "need" ? screenForEmergency(useAppStore.getState().emergencyRequest?.status) : initialScreen);
   const [selectedProblem, setSelectedProblem] = useState("");
+  const [landmark, setLandmark] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  // Don't allow a second request while we check for one that is already active.
+  const [activeChecked, setActiveChecked] = useState(false);
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [requestLocation, setRequestLocation] = useState<GeoPoint | null>(null);
   const [liveRequest, setLiveRequest] = useState<ServiceRequest | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
   const [routeCoords, setRouteCoords] = useState<Array<[number, number]> | null>(null);
   const [providerPoint, setProviderPoint] = useState<{ lat: number; lng: number } | null>(null);
-  const geo = useGeolocation({ immediate: false, watch: screen === "tracking" || screen === "location" || screen === "searching" || screen === "sent" });
+  const geo = useGeolocation({ immediate: false, watch: screen === "tracking" || screen === "need" });
   const theme = useAppStore((state) => state.theme);
   const setTheme = useAppStore((state) => state.setTheme);
   const emergencyRequest = useAppStore((state) => state.emergencyRequest);
@@ -1672,6 +1268,10 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
         const items = await requestService.list();
         const current = items.find((item) => item.kind === "emergency" && item.status !== "completed" && item.status !== "cancelled");
         if (!active || !current) return;
+        if (initialScreen === "need") {
+          navigate(`/app/track/${current.id}`, { replace: true });
+          return;
+        }
         backendRequestId.current = current.id;
         setLiveRequest(current);
         if (current.location.lat != null && current.location.lng != null) {
@@ -1684,9 +1284,13 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
         }
       } catch {
         // Best effort: live tracking can still start from a new request.
+      } finally {
+        if (active) setActiveChecked(true);
       }
     })();
-    return () => { active = false; };
+    // Never keep someone waiting on a slow network in an emergency.
+    const unblock = window.setTimeout(() => setActiveChecked(true), 2000);
+    return () => { active = false; window.clearTimeout(unblock); };
   }, []);
 
   useEffect(() => {
@@ -1734,6 +1338,43 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
     }
   };
 
+  const sendEmergency = async () => {
+    if (sending) return;
+    if (!vehicle) {
+      setSendError("Add your car first so providers know what to bring.");
+      return;
+    }
+    const loc = ensureLocation();
+    const typedLandmark = landmark.trim();
+    if (!loc && !typedLandmark) {
+      setSendError("Share your location or type a landmark so help can find you.");
+      return;
+    }
+    setSending(true);
+    setSendError(null);
+    try {
+      // The request only counts once the server has it, so wait for that
+      // before telling the person help has been requested.
+      const request = await emergencyService.submit({
+        vehicleId: vehicle.id,
+        problem: selectedProblem || "Not sure",
+        location: { label: typedLandmark || loc?.label || "Current location", ...(loc ? { lat: loc.lat, lng: loc.lng } : {}) },
+      });
+      backendRequestId.current = request.id;
+      setLiveRequest(request);
+      try {
+        (["locating", "searching", "results", "confirming", "requested", "matched", "enRoute"] as EmergencyStatus[]).forEach((status) => transitionRequest(status));
+      } catch (error) {
+        console.error(error);
+      }
+      setScreen("tracking");
+    } catch (error) {
+      setSendError(errorMessage(error, "We couldn't send your request. Check your connection and try again."));
+    } finally {
+      setSending(false);
+    }
+  };
+
   const advanceEmergency = (statuses: EmergencyStatus[], nextScreen: Screen) => {
     try {
       statuses.forEach((status) => transitionRequest(status));
@@ -1745,12 +1386,12 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
   };
 
   useEffect(() => {
-    if (screen === "location" && !geo.point && !geo.loading) geo.request();
+    if (screen === "need" && !geo.point && !geo.loading) geo.request();
   }, [geo, screen]);
 
   useEffect(() => {
     const id = backendRequestId.current;
-    if (!id || !requestLocation || !["location", "searching", "sent", "tracking"].includes(screen)) return;
+    if (!id || !requestLocation || !["tracking"].includes(screen)) return;
     void requestService
       .updateLocation(id, { label: requestLocation.label ?? "Current location", lat: requestLocation.lat, lng: requestLocation.lng })
       .then((updated) => setLiveRequest(updated))
@@ -1877,13 +1518,26 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
     switch (screen) {
       case "home": return <HomeScreen onEmergency={beginEmergency} onNavigate={openDriverFeatures} onProfile={() => navigate("/app/profile")} />;
       case "profile": return <ProfileScreen onEmergency={beginEmergency} onHome={() => navigate("/app/home")} onNavigate={openDriverFeatures} setTheme={setTheme} theme={theme} />;
-      case "need": return <NeedScreen onBack={() => navigate("/app/home")} onContinue={() => advanceEmergency(["locating"], "location")} onSelect={setSelectedProblem} selected={selectedProblem} />;
-      case "location": return <LocationScreen onBack={() => setScreen("need")} onContinue={() => { if (geo.point) setRequestLocation({ ...geo.point, label: geo.point.label ?? "Current location" }); advanceEmergency(["searching"], "searching"); }} onDenied={() => setScenario("location-denied")} location={requestLocation ?? geo.point} loading={geo.loading} error={geo.error} onRefresh={() => geo.request()} />;
-      case "searching": return <SearchingScreen onCancel={() => { setScreen("home"); setSelectedProblem(""); }} onFound={() => advanceEmergency(["results"], "results")} />;
-      case "results": return <ProviderResults onBack={() => setScreen("location")} onSelect={() => advanceEmergency(["confirming"], "confirm")} />;
-      case "confirm": return <ConfirmScreen onBack={() => setScreen("results")} onConfirm={() => advanceEmergency(["requested"], "sent")} problem={selectedProblem} locationLabel={(requestLocation ?? geo.point)?.label ?? "Current location"} vehicle={vehicle} />;
-      case "sent": return <SentScreen onContinue={() => advanceEmergency(["matched", "enRoute"], "tracking")} />;
-      case "tracking": return <TrackingScreen onArrived={() => advanceEmergency(["nearby", "arrived"], "arrived")} onScenario={(s) => { if (s === "cancelled") { void cancelActiveRequest(); } else { setScenario(s); } }} request={liveRequest} userLocation={requestLocation ?? geo.point} providerLocation={providerPoint} route={routeCoords} error={trackingError} onRefresh={() => { const id = backendRequestId.current; if (id) void requestService.get(id).then(setLiveRequest).catch((e) => setTrackingError(errorMessage(e, "We couldn't refresh live tracking. We'll keep trying."))); }} />;
+      case "need": return (
+        <EmergencyRequestScreen
+          canSend={activeChecked && Boolean(vehicle) && Boolean(requestLocation ?? geo.point ?? landmark.trim())}
+          landmark={landmark}
+          location={requestLocation ?? geo.point}
+          locating={geo.loading}
+          locationError={geo.error}
+          onBack={() => navigate("/app/home")}
+          onLandmark={setLandmark}
+          onRefreshLocation={() => geo.request()}
+          onSelect={setSelectedProblem}
+          onSend={() => void sendEmergency()}
+          onVehicle={() => navigate("/app/vehicles")}
+          selected={selectedProblem}
+          sendError={sendError}
+          sending={sending}
+          vehicle={vehicle}
+        />
+      );
+      case "tracking": return <TrackingScreen onArrived={() => advanceEmergency(["nearby", "arrived"], "arrived")} onScenario={(s) => { if (s === "cancelled") { void cancelActiveRequest(); } else { setScenario(s); } }} request={liveRequest} userLocation={requestLocation ?? geo.point} providerLocation={liveRequest && liveRequest.status !== "requested" ? providerPoint : null} route={liveRequest && liveRequest.status !== "requested" ? routeCoords : null} error={trackingError} onRefresh={() => { const id = backendRequestId.current; if (id) void requestService.get(id).then(setLiveRequest).catch((e) => setTrackingError(errorMessage(e, "We couldn't refresh live tracking. We'll keep trying."))); }} />;
       case "arrived": return <ArrivedScreen onEstimate={() => advanceEmergency(["diagnosing", "awaitingApproval"], "estimate")} />;
       case "estimate": return <EstimateScreen onApprove={() => advanceEmergency(["repairing", "completed", "paying"], "payment")} onBack={() => setScreen("arrived")} />;
       case "payment": return <PaymentScreen onPaid={() => advanceEmergency(["paid"], "rating")} />;
@@ -1891,7 +1545,7 @@ export default function DriverApp({ initialScreen = "home" }: { initialScreen?: 
       case "complete": return <CompleteScreen onHome={() => setScreen("home")} />;
       default: return null;
     }
-  }, [emergencyRequest, geo.error, geo.loading, geo.point, liveRequest, navigate, providerPoint, requestLocation, routeCoords, scenario, screen, selectedProblem, theme, trackingError, vehicle]);
+  }, [activeChecked, emergencyRequest, geo.error, geo.loading, geo.point, landmark, liveRequest, navigate, providerPoint, requestLocation, routeCoords, scenario, screen, selectedProblem, sendError, sending, theme, trackingError, vehicle]);
 
   return content;
 }

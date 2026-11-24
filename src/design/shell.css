@@ -38,3 +38,13 @@ body:has(.app-shell) { overflow: auto; }
 }
 
 .device-controls { display: none !important; }
+
+/* Driver screens use the same mobile column on larger displays. */
+@media (min-width: 480px) {
+  .app-layout:not(.app-layout--wide) {
+    max-width: 420px;
+    margin-inline: auto;
+    border-inline: 1px solid var(--border);
+    background: var(--bg);
+  }
+}
