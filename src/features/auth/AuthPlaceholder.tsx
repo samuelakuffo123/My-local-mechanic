@@ -74,6 +74,11 @@ function formatPhone(value: string): string {
   return `${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5)}`;
 }
 
+/** Full international number used for the confirmation step and OTP screen. */
+function displayPhone(value: string): string {
+  return canonicalPhone(value) ? `+233 ${formatPhone(value)}` : formatPhone(value);
+}
+
 function emptyDigits(): string[] {
   return Array.from({ length: OTP_LENGTH }, () => "");
 }
@@ -98,6 +103,7 @@ export function AuthPlaceholder() {
   const [name, setName] = useState(seed?.name ?? "");
   const [phone, setPhone] = useState(seed?.phone ? formatPhone(seed.phone) : "");
   const [phoneTouched, setPhoneTouched] = useState(false);
+  const [confirmingPhone, setConfirmingPhone] = useState<string | null>(null);
   const [role, setRole] = useState<Role>(seed?.role ?? "driver");
   const [otpPhone, setOtpPhone] = useState(seed?.phone ?? "");
   const [digits, setDigits] = useState<string[]>(emptyDigits);
@@ -109,6 +115,7 @@ export function AuthPlaceholder() {
   const [googleNotice, setGoogleNotice] = useState<string | null>(null);
   const [smsFailed, setSmsFailed] = useState(false);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const phoneInputRef = useRef<HTMLInputElement | null>(null);
 
   const code = digits.join("");
   const mode: AuthMode = view === "verify" ? initialMode : view === "signup" ? "signup" : "login";
@@ -142,12 +149,24 @@ export function AuthPlaceholder() {
     return () => window.clearInterval(timer);
   }, [view]);
 
-  const title = view === "verify" ? "Verify your phone" : view === "signup" ? "Create your account" : "Welcome back";
-  const subtitle = view === "verify"
-    ? "Enter the 6-digit code we sent to your phone."
-    : view === "signup"
-      ? "Set up your profile and get roadside help in minutes."
-      : "Sign in to manage your vehicles, bookings and requests.";
+  const verifyTarget = otpPhone || phone;
+
+  const title = confirmingPhone
+    ? "Check your number"
+    : view === "verify"
+      ? "Verify your phone"
+      : view === "signup"
+        ? "Create your account"
+        : "Welcome back";
+  const subtitle = confirmingPhone
+    ? `Is ${displayPhone(confirmingPhone)} correct? We'll send a 6-digit code by SMS.`
+    : view === "verify"
+      ? verifyTarget
+        ? `Enter the 6-digit code we sent to ${displayPhone(verifyTarget)}.`
+        : "Enter the 6-digit code we sent to your phone."
+      : view === "signup"
+        ? "Set up your profile and get roadside help in minutes."
+        : "Sign in to manage your vehicles, bookings and requests.";
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -212,7 +231,21 @@ export function AuthPlaceholder() {
       setPhoneTouched(true);
       return;
     }
-    void sendCode(target, mode === "signup" ? "signup" : "login");
+    setError(null);
+    setConfirmingPhone(target);
+  };
+
+  const confirmPhone = () => {
+    if (!confirmingPhone) return;
+    const target = confirmingPhone;
+    const flow: AuthMode = mode === "signup" ? "signup" : "login";
+    setConfirmingPhone(null);
+    void sendCode(target, flow);
+  };
+
+  const editPhone = () => {
+    setConfirmingPhone(null);
+    window.setTimeout(() => phoneInputRef.current?.focus(), 0);
   };
 
   const verify = () =>
@@ -334,8 +367,13 @@ export function AuthPlaceholder() {
     <main className="auth-screen">
       <div className="auth-panel">
         <div className="au-topbar">
-          {view === "verify" ? (
-            <button aria-label="Back to phone number" className="au-icon-button" onClick={changeNumber} type="button">
+          {view === "verify" || confirmingPhone ? (
+            <button
+              aria-label={confirmingPhone ? "Back to phone number entry" : "Back to phone number"}
+              className="au-icon-button"
+              onClick={confirmingPhone ? editPhone : changeNumber}
+              type="button"
+            >
               <ArrowLeft size={20} />
             </button>
           ) : <span className="au-icon-placeholder" aria-hidden="true" />}
@@ -400,9 +438,26 @@ export function AuthPlaceholder() {
             </button>
 
             <div className="au-otp-links">
-              <button className="au-link" disabled={busy || resendIn > 0} onClick={() => void sendCode(otpPhone, mode)} type="button">
-                {resendIn > 0 ? <span aria-live="polite">Resend code in {resendIn}s</span> : "Resend code"}
-              </button>
+              <p className="au-resend">
+                {resendIn > 0 ? (
+                  <>
+                    Didn't receive it?{" "}
+                    <span aria-label={`Resend available in ${resendIn} seconds`} role="timer">
+                      Resend in 00:{String(resendIn).padStart(2, "0")}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    Didn't receive the code?{" "}
+                    <button className="au-link au-link--inline" disabled={busy} onClick={() => void sendCode(otpPhone, mode)} type="button">
+                      Resend code
+                    </button>
+                  </>
+                )}
+                <span aria-live="polite" className="au-sr-only">
+                  {resendIn === 0 ? "You can resend the code now." : ""}
+                </span>
+              </p>
               <button className="au-link" disabled={busy} onClick={changeNumber} type="button">
                 Change number
               </button>
@@ -410,6 +465,24 @@ export function AuthPlaceholder() {
 
             {googleButton}
           </form>
+        ) : confirmingPhone ? (
+          <div aria-label="Confirm phone number" className="au-form au-confirm" role="group">
+            <p className="au-confirm-number">{displayPhone(confirmingPhone)}</p>
+            <p className="au-help">
+              A 6-digit code will be sent to this number. Make sure it's yours.
+            </p>
+            <div className="au-confirm-actions">
+              <button className="au-button au-button--secondary" disabled={busy} onClick={editPhone} type="button">
+                Edit number
+              </button>
+              <button aria-busy={busy} className="au-button au-button--primary" disabled={busy} onClick={confirmPhone} type="button">
+                {busy ? <LoaderCircle className="au-spinner" size={18} /> : null}
+                {busy ? "Sending…" : "Yes, send code"}
+                {!busy && <ArrowRight size={17} />}
+              </button>
+            </div>
+            {googleButton}
+          </div>
         ) : (
           <form
             className="au-form"
@@ -449,6 +522,7 @@ export function AuthPlaceholder() {
                   autoComplete="tel"
                   className="au-phone__input"
                   id="auth-phone"
+                  ref={phoneInputRef}
                   inputMode="tel"
                   onChange={(event) => setPhone(formatPhone(event.target.value))}
                   onBlur={() => setPhoneTouched(true)}
@@ -463,7 +537,7 @@ export function AuthPlaceholder() {
                 </p>
               ) : (
                 <p aria-live="polite" className="au-help" id="auth-phone-help">
-                  We'll text you a 6-digit code.
+                  We'll ask you to confirm before sending a code.
                 </p>
               )}
             </div>
@@ -489,7 +563,7 @@ export function AuthPlaceholder() {
 
             <button aria-busy={busy} className="au-button au-button--primary" disabled={busy || !canSubmitPhone} type="submit">
               {busy ? <LoaderCircle className="au-spinner" size={18} /> : null}
-              {busy ? "Sending code…" : "Send code"}
+              {busy ? "Sending…" : "Continue"}
               {!busy && <ArrowRight size={17} />}
             </button>
 

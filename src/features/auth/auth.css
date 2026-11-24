@@ -326,6 +326,17 @@
   color: #1f2937;
 }
 
+.au-button--secondary {
+  background: var(--auth-surface);
+  border-color: var(--auth-border);
+  color: var(--auth-text);
+}
+
+.au-button--secondary:hover:not(:disabled) {
+  border-color: var(--auth-accent);
+  background: rgba(79, 70, 229, 0.05);
+}
+
 .au-button--google:hover:not(:disabled) {
   background: #f3f4f6;
   border-color: var(--auth-accent);
@@ -390,6 +401,24 @@
   font-size: 13px;
 }
 
+.au-confirm-number {
+  padding: 18px 12px;
+  border: 1.5px solid var(--auth-border);
+  border-radius: 14px;
+  background: rgba(79, 70, 229, 0.04);
+  color: var(--auth-text);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-align: center;
+}
+
+.au-confirm-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .au-otp {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -426,6 +455,37 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.au-resend {
+  color: var(--auth-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.au-resend [role="timer"] {
+  color: var(--auth-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.au-link--inline {
+  min-height: 0;
+  padding: 0;
+  font-size: inherit;
+  vertical-align: baseline;
+}
+
+.au-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .au-link {
@@ -575,6 +635,10 @@
 
   .au-otp {
     gap: 6px;
+  }
+
+  .au-confirm-actions {
+    grid-template-columns: 1fr;
   }
 }
 
