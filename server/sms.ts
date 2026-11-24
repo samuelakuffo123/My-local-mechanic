@@ -47,6 +47,10 @@ function logArkeselFailure(action: string, detail: string) {
   console.error(`[sms] Arkesel ${action} failed: ${detail.slice(0, 200)}`);
 }
 
+function logArkeselTiming(action: string, startedAt: number) {
+  console.info(`[sms] Arkesel ${action} responded in ${Date.now() - startedAt}ms`);
+}
+
 function arkeselFailure(action: string, detail: string): AppError {
   logArkeselFailure(action, detail);
   return new AppError(SMS_UNAVAILABLE, 503, "sms_provider_failed");
@@ -99,6 +103,7 @@ async function arkeselPost(path: string, payload: Record<string, unknown>): Prom
   if (!apiKey) throw smsNotConfigured();
 
   const action = path.includes("verify") ? "verify" : "generate";
+  const startedAt = Date.now();
   let response: Response;
   try {
     response = await fetch(`https://sms.arkesel.com${path}`, {
@@ -111,7 +116,7 @@ async function arkeselPost(path: string, payload: Record<string, unknown>): Prom
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
-    throw arkeselFailure(action, "gateway unreachable");
+    throw arkeselFailure(action, `gateway unreachable after ${Date.now() - startedAt}ms`);
   }
 
   let data: ArkeselResponse | null = null;
@@ -120,6 +125,7 @@ async function arkeselPost(path: string, payload: Record<string, unknown>): Prom
   } catch {
     // A non-JSON error body still produces a useful HTTP error below.
   }
+  logArkeselTiming(action, startedAt);
 
   const code = responseCode(data);
   if (!response.ok || code === "401") {
@@ -198,14 +204,16 @@ async function arkeselLegacySms(phone: string, code: string): Promise<string> {
   // Ask for JSON so failures such as low balance are not mistaken for success.
   url.searchParams.set("response", "json");
 
+  const startedAt = Date.now();
   let response: Response;
   try {
     response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   } catch {
-    throw arkeselFailure("send", "gateway unreachable");
+    throw arkeselFailure("send", `gateway unreachable after ${Date.now() - startedAt}ms`);
   }
 
   const raw = await response.text();
+  logArkeselTiming("send", startedAt);
   let data: ArkeselResponse | null = null;
   try {
     data = JSON.parse(raw) as ArkeselResponse;

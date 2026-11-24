@@ -123,6 +123,7 @@ Add the same URL to Google's authorized origins and Mapbox's URL restrictions.
 | `SMS_PROVIDER=arkesel` | phone signup in production | Enables the Arkesel OTP adapter |
 | `ARKESEL_API_KEY` | with Arkesel | **Main SMS API Key**; OTP does not work with Multiple API Keys |
 | `SMS_SENDER_ID` | optional | Sender name shown to users; max 11 characters; register it with Arkesel |
+| `OTP_TTL_MINUTES` | optional, default 10 | How long a code stays valid; Arkesel caps OTP expiry at 10 minutes |
 
 Set the Paystack webhook URL to
 `https://<service>.onrender.com/api/payments/webhook/paystack`.
@@ -145,6 +146,11 @@ These fail loudly rather than pretending to work:
    recipient sees the registered `SMS_SENDER_ID` (`MechNow`) when it is approved,
    and every code message also starts with "MechNow". Google sign-in also works
    without SMS when `GOOGLE_CLIENT_ID` and the authorized origin are configured.
+   Codes stay valid for 10 minutes by default so a delayed SMS is still usable,
+   and a still-valid earlier code works even after requesting a new one. Render
+   logs include `[sms] Arkesel ... responded in Nms`; a fast response here means
+   any remaining delay is in Arkesel's carrier delivery. Slow or queued delivery
+   is usually caused by a low Main Balance or an unapproved sender ID.
 2. **Payments.** The development adapter is hard-disabled in production. Live
    payments need Paystack keys and a verified webhook.
 3. **Demo map data.** `SEED_DEMO_DATA` is refused in production, so the nearby

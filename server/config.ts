@@ -24,6 +24,13 @@ const platformOrigin =
   (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}` : "");
 const corsOrigins = [...new Set([...configuredOrigins, platformOrigin].filter(Boolean))];
 
+// Arkesel caps OTP expiry at 10 minutes. Keep the local expiry in step so a
+// delayed SMS is still usable when it finally reaches the phone.
+const otpTtlMinutes = Math.min(
+  10,
+  Math.max(1, Math.trunc(Number(process.env.OTP_TTL_MINUTES ?? 10)) || 10),
+);
+
 /** Environment values are untrusted input too; strip copy/paste whitespace. */
 export function trimmedEnv(value: string | undefined): string {
   return value?.trim() ?? "";
@@ -51,7 +58,7 @@ export const config = {
   trustProxy: process.env.TRUST_PROXY === "true",
 
   sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? 24 * 14),
-  otpTtlMinutes: Number(process.env.OTP_TTL_MINUTES ?? 5),
+  otpTtlMinutes,
   otpMaxAttempts: Number(process.env.OTP_MAX_ATTEMPTS ?? 5),
 
   // Payment gateway selection. "dev" is a clearly-labelled local adapter that

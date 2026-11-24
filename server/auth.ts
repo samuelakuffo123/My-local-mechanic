@@ -35,6 +35,15 @@ interface UserRow {
 const USER_COLUMNS = "id, role, name, phone, email, avatar_data_url as avatarDataUrl, status";
 const SELF_SERVE_ROLES: Role[] = ["driver", "mechanic", "tow", "vendor"];
 
+interface OtpRecord {
+  id: string;
+  code_hash: string;
+  provider_managed: number | boolean;
+  attempts: number;
+  expires_at: string;
+  consumed_at: string | null;
+}
+
 // Used when a phone number has no credentials so unknown numbers take a similar
 // amount of time to reject as known ones.
 const DUMMY_CREDENTIALS = hashPassword("mechnow-dummy-password");
@@ -77,41 +86,56 @@ export async function verifyOtp(rawPhone: string, code: string, options: { name?
   const phone = normalisePhone(rawPhone);
   if (!rateLimit(`verify:phone:${phone}`, 10, 15 * 60_000)) throw tooMany();
 
-  const record = await get<{
-    id: string;
-    code_hash: string;
-    provider_managed: number | boolean;
-    attempts: number;
-    expires_at: string;
-    consumed_at: string | null;
-  }>(
+  // A delayed SMS may arrive after the user asked for another code. Accept any
+  // still-valid unconsumed code for this number instead of only the newest one.
+  const records = await all<OtpRecord>(
     `SELECT id, code_hash, provider_managed, attempts, expires_at, consumed_at FROM otp_codes
-     WHERE phone = ? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
-    [phone],
+     WHERE phone = ? AND consumed_at IS NULL AND expires_at > ? ORDER BY created_at DESC`,
+    [phone, nowIso()],
   );
-  if (!record) throw badRequest("Request a verification code first.");
-  if (record.consumed_at) throw badRequest("That code has already been used.");
-  if (new Date(record.expires_at).getTime() <= Date.now()) throw badRequest("That code has expired. Request a new one.");
-  if (record.attempts >= config.otpMaxAttempts) throw tooMany("Too many incorrect attempts. Request a new code.");
-  if (record.provider_managed) {
-    try {
-      await verifyProviderOtp(phone, code);
-    } catch (caught) {
-      // Count wrong codes against the local attempt limit, but do not punish
-      // the user for a provider outage or an expired code.
-      if (caught instanceof AppError && caught.code === PROVIDER_OTP_INVALID) {
-        await run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
-      }
-      throw caught;
+  if (!records.length) throw badRequest("Request a verification code first.");
+
+  let matched: OtpRecord | null = null;
+  let attemptsExhausted = false;
+  for (const record of records) {
+    if (record.attempts >= config.otpMaxAttempts) {
+      attemptsExhausted = true;
+      continue;
     }
-  } else if (!safeEqual(record.code_hash, otpHash(phone, code))) {
+    if (record.provider_managed) {
+      try {
+        await verifyProviderOtp(phone, code);
+        matched = record;
+        break;
+      } catch (caught) {
+        // Count wrong codes against the local attempt limit, but do not punish
+        // the user for a provider outage or an expired code.
+        if (caught instanceof AppError && caught.code === PROVIDER_OTP_INVALID) {
+          await run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
+          continue;
+        }
+        if (caught instanceof AppError && caught.code === "otp_expired") continue;
+        throw caught;
+      }
+    }
+    if (safeEqual(record.code_hash, otpHash(phone, code))) {
+      matched = record;
+      break;
+    }
     await run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
+  }
+  if (!matched) {
+    if (attemptsExhausted) throw tooMany("Too many incorrect attempts. Request a new code.");
     throw badRequest("That code is incorrect.");
   }
 
   const role: Role = options.role && SELF_SERVE_ROLES.includes(options.role) ? options.role : "driver";
   const issued = await tx(async () => {
-    await run("UPDATE otp_codes SET consumed_at = ? WHERE id = ?", [nowIso(), record.id]);
+    // Once one code is used, retire every other pending code for this number.
+    await run(
+      "UPDATE otp_codes SET consumed_at = ? WHERE phone = ? AND consumed_at IS NULL",
+      [nowIso(), phone],
+    );
     let user = await get<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE phone = ?`, [phone]);
     if (!user) {
       const id = newId();

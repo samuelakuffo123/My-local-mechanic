@@ -84,3 +84,6 @@ services:
         sync: false
       - key: SMS_SENDER_ID
         value: MechNow
+      # Keep codes usable if an SMS is delayed. Arkesel caps OTP expiry at 10 minutes.
+      - key: OTP_TTL_MINUTES
+        value: "10"

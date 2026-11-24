@@ -110,6 +110,7 @@ export function AuthPlaceholder() {
   const [devCode, setDevCode] = useState<string | null>(seed?.devCode ?? null);
   const [resendIn, setResendIn] = useState(RESEND_SECONDS);
   const [busy, setBusy] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [googleConfig, setGoogleConfig] = useState<GoogleConfig | null>(null);
   const [googleNotice, setGoogleNotice] = useState<string | null>(null);
@@ -196,34 +197,54 @@ export function AuthPlaceholder() {
     navigate(homeFor(user.role), { replace: true });
   };
 
-  const sendCode = (target: string, flow: AuthMode) =>
-    run(async () => {
+  const sendCode = (target: string, flow: AuthMode, advance = false) => {
+    const pending: PendingOtp = {
+      phone: target,
+      name: name.trim() || undefined,
+      role,
+      mode: flow,
+    };
+
+    // Open the verification screen immediately. A slow gateway should not
+    // leave the user staring at the previous screen with no progress.
+    if (advance) {
+      try {
+        sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+      } catch {
+        // Storage unavailable; the router state below still carries the flow.
+      }
+      setOtpPhone(target);
+      setDevCode(null);
+      setDigits(emptyDigits());
+      setResendIn(RESEND_SECONDS);
+      setSmsFailed(false);
+      navigate("/verify", { state: pending });
+    }
+
+    setSendingCode(true);
+    setError(null);
+    void (async () => {
       try {
         const result = await authService.requestOtp(target);
-        const pending: PendingOtp = {
-          phone: target,
-          name: name.trim() || undefined,
-          role,
-          devCode: result.devCode,
-          mode: flow,
-        };
+        const sent: PendingOtp = { ...pending, devCode: result.devCode };
         try {
-          sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+          sessionStorage.setItem(PENDING_KEY, JSON.stringify(sent));
         } catch {
           // Storage unavailable; the router state below still carries the flow.
         }
-        setOtpPhone(target);
         setDevCode(result.devCode ?? null);
-        setDigits(emptyDigits());
         setResendIn(RESEND_SECONDS);
         setSmsFailed(false);
-        navigate("/verify", { state: pending });
+        if (!advance) navigate("/verify", { state: sent, replace: true });
       } catch (caught) {
         // Surface a Google alternative when the SMS gateway itself is down.
         setSmsFailed(isSmsDeliveryError(caught));
-        throw caught;
+        setError(errorMessage(caught, "We couldn't send your verification code. Try again."));
+      } finally {
+        setSendingCode(false);
       }
-    });
+    })();
+  };
 
   const requestCode = () => {
     const target = canonicalPhone(phone);
@@ -240,7 +261,7 @@ export function AuthPlaceholder() {
     const target = confirmingPhone;
     const flow: AuthMode = mode === "signup" ? "signup" : "login";
     setConfirmingPhone(null);
-    void sendCode(target, flow);
+    sendCode(target, flow, true);
   };
 
   const editPhone = () => {
@@ -402,6 +423,11 @@ export function AuthPlaceholder() {
               void verify();
             }}
           >
+            {sendingCode && (
+              <p className="au-notice" role="status">
+                Sending your code to {displayPhone(verifyTarget)}…
+              </p>
+            )}
             {devCode && (
               <p className="au-notice" role="status">
                 Development code: <strong>{devCode}</strong>
@@ -431,10 +457,10 @@ export function AuthPlaceholder() {
               </div>
             </fieldset>
 
-            <button aria-busy={busy} className="au-button au-button--primary" disabled={busy || code.length !== OTP_LENGTH} type="submit">
-              {busy ? <LoaderCircle className="au-spinner" size={18} /> : null}
-              {busy ? "Verifying…" : "Verify & continue"}
-              {!busy && <ArrowRight size={17} />}
+            <button aria-busy={busy || sendingCode} className="au-button au-button--primary" disabled={busy || sendingCode || code.length !== OTP_LENGTH} type="submit">
+              {busy || sendingCode ? <LoaderCircle className="au-spinner" size={18} /> : null}
+              {sendingCode ? "Sending code…" : busy ? "Verifying…" : "Verify & continue"}
+              {!busy && !sendingCode && <ArrowRight size={17} />}
             </button>
 
             <div className="au-otp-links">
@@ -449,11 +475,12 @@ export function AuthPlaceholder() {
                 ) : (
                   <>
                     Didn't receive the code?{" "}
-                    <button className="au-link au-link--inline" disabled={busy} onClick={() => void sendCode(otpPhone, mode)} type="button">
+                    <button className="au-link au-link--inline" disabled={busy || sendingCode} onClick={() => sendCode(otpPhone, mode)} type="button">
                       Resend code
                     </button>
                   </>
                 )}
+                <span className="au-resend__note">SMS can take a moment to arrive.</span>
                 <span aria-live="polite" className="au-sr-only">
                   {resendIn === 0 ? "You can resend the code now." : ""}
                 </span>
