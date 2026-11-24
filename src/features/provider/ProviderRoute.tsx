@@ -27,7 +27,7 @@ export function ProviderRoute() {
   if (!isProviderRole(userRole)) return null;
 
   return (
-    <DeviceFrame theme={theme}>
+    <DeviceFrame theme={theme} app={userRole}>
       <ProviderWorkspaces onExit={exit} role={userRole} />
     </DeviceFrame>
   );

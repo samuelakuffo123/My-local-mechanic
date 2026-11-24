@@ -69,7 +69,7 @@ import { LiveMap } from "../../components/LiveMap";
 import { useGeolocation, type GeoPoint } from "../../hooks/useGeolocation";
 import { useNearbyProviders } from "../../hooks/useNearbyProviders";
 import { EmergencyHero } from "../emergency/EmergencyHero";
-import { EmergencyRequestScreen } from "../emergency/EmergencyRequestScreen";
+import { EmergencyRequestScreen, SUPPORT_PHONE } from "../emergency/EmergencyRequestScreen";
 import { getDrivingRoute } from "../../services/directions";
 import { errorMessage } from "../../services/errorMessage";
 import { displayFirstName, displayName, isPlaceholderName } from "../../utils/displayName";
@@ -795,7 +795,7 @@ function ProfilePanelSheet({
               <button onClick={() => handleDemoAction("Issue reporting")} type="button"><CircleAlert size={19} /><span><strong>Report an issue</strong><small>Tell us what went wrong</small></span><ChevronRight size={17} /></button>
               <button onClick={() => handleDemoAction("Support tickets")} type="button"><FileText size={19} /><span><strong>Support tickets</strong><small>MN-4821 · Waiting for your reply</small></span><em>1</em><ChevronRight size={17} /></button>
               <button onClick={() => handleDemoAction("Safety centre")} type="button"><ShieldCheck size={19} /><span><strong>Safety centre</strong><small>Emergency guidance and trusted contacts</small></span><ChevronRight size={17} /></button>
-              <button onClick={() => { window.location.href = "tel:+233241234567"; }} type="button"><Phone size={19} /><span><strong>Call support</strong><small>+233 24 123 4567</small></span><ChevronRight size={17} /></button>
+              <button onClick={() => { window.location.href = `tel:${SUPPORT_PHONE}`; }} type="button"><Phone size={19} /><span><strong>Call support</strong><small>059 626 3884</small></span><ChevronRight size={17} /></button>
             </section>
           </>
         )}
@@ -914,7 +914,7 @@ function SafetyActions({ onCancel }: { onCancel: () => void }) {
     <section className="safety-actions">
       <span className="overline">SAFETY & SUPPORT</span>
       <div>
-        <button onClick={() => { window.location.href = "tel:+233241234567"; }} type="button"><Phone size={19} /><span>Call</span></button>
+        <button onClick={() => { window.location.href = `tel:${SUPPORT_PHONE}`; }} type="button"><Phone size={19} /><span>Call</span></button>
         <button onClick={async () => {
           const shareData = {
             title: "MechNow trip",

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import "./emergency.css";
 
-export const SUPPORT_PHONE = "+233241234567"; // TODO: replace with the real MechNow support line
+export const SUPPORT_PHONE = "+233596263884";
 
 const PROBLEMS: { label: string; icon: LucideIcon; danger?: boolean }[] = [
   { label: "Car won't start", icon: Zap },

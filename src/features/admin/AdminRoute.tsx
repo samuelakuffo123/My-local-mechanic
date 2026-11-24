@@ -11,7 +11,7 @@ export function AdminRoute() {
     void signOut().finally(() => navigate("/login", { replace: true }));
   };
   return (
-    <DeviceFrame theme={theme}>
+    <DeviceFrame theme={theme} app="admin">
       <AdminWorkspace onExit={exit} />
     </DeviceFrame>
   );

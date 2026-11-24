@@ -7,9 +7,17 @@ import type { Theme } from "../state/types";
  * column on larger screens. There is no fake device bezel, status bar
  * or floating preview controls. The theme is changed from Profile.
  */
-export function DeviceFrame({ children, theme }: { children: ReactNode; theme: Theme }) {
+export function DeviceFrame({
+  children,
+  theme,
+  app = "driver",
+}: {
+  children: ReactNode;
+  theme: Theme;
+  app?: "driver" | "tow" | "mechanic" | "vendor" | "admin";
+}) {
   return (
-    <div className="app-shell" data-theme={theme}>
+    <div className="app-shell" data-app={app} data-theme={theme}>
       <div className="phone-frame">{children}</div>
     </div>
   );
