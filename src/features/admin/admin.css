@@ -1,0 +1,127 @@
+/* Admin overview, laid out for a phone column. Scoped to .ad-root so the
+   provider workspaces that share provider.css are not affected. The legacy
+   rules use 6-9px text; everything here sets readable sizes explicitly. */
+
+.ad-root {
+  --ad-field-border: #8a94a6;
+  --ad-accent: var(--brand-hover);
+  --ad-ok-bg: #e6f7ee;     --ad-ok-fg: #0b6b3a;
+  --ad-warn-bg: #fff1cc;   --ad-warn-fg: #6b4300;
+  --ad-solid-ok: #0f7b46;  --ad-solid-ok-fg: #ffffff;
+}
+[data-theme="dark"] .ad-root {
+  --ad-field-border: rgba(154, 165, 189, .55);
+  --ad-accent: var(--brand);
+  --ad-ok-bg: rgba(71, 217, 150, .14);  --ad-ok-fg: #5fe0a6;
+  --ad-warn-bg: rgba(255, 200, 104, .14); --ad-warn-fg: #ffc868;
+  --ad-solid-ok: #47d996;  --ad-solid-ok-fg: #04210f;
+}
+
+.ad-root .d-page { padding: 16px 16px 32px; display: grid; gap: 16px; max-width: none; }
+
+/* Heading */
+.ad-root .d-page-heading { flex-direction: column; align-items: stretch; gap: 14px; margin: 0; }
+.ad-root .d-kicker { font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--ad-accent); background: none; }
+.ad-root .d-page-heading h2 { margin-top: 6px; font-size: 28px; line-height: 1.15; }
+.ad-root .d-page-heading p { margin-top: 6px; font-size: 15px; line-height: 1.45; color: var(--text-2); }
+.ad-root .d-heading-actions { display: flex; gap: 8px; }
+.ad-root .d-heading-actions button {
+  min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px;
+  border: 1.5px solid var(--ad-field-border); border-radius: 12px;
+  background: var(--surface-1); color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.ad-root .d-heading-actions button:disabled { opacity: .6; }
+
+/* Review banner */
+.ad-root .d-admin-alert {
+  min-height: 0; margin: 0; padding: 14px; flex-wrap: wrap; gap: 8px 12px; align-items: flex-start;
+  border: 1px solid color-mix(in srgb, var(--ad-accent) 35%, var(--border)); border-radius: 16px;
+  background: var(--brand-subtle); color: var(--ad-accent);
+}
+.ad-root .d-admin-alert > svg { flex: none; margin-top: 2px; }
+.ad-root .d-admin-alert > span { flex: 1 1 200px; min-width: 0; display: grid; gap: 4px; }
+.ad-root .d-admin-alert strong { font-size: 15px; line-height: 1.35; color: var(--text); }
+.ad-root .d-admin-alert small { font-size: 13px; line-height: 1.4; color: var(--text-2); margin: 0; }
+.ad-root .d-admin-alert a {
+  min-height: 44px; margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 14px; font-weight: 700; color: var(--ad-accent); text-decoration: none;
+}
+
+/* Metrics */
+.ad-root .d-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ad-root .d-metric { min-height: 0; padding: 14px; flex-direction: column; gap: 12px; border-radius: 18px; }
+.ad-root .d-metric > div { gap: 4px; min-width: 0; }
+.ad-root .d-metric small { font-size: 12px; letter-spacing: .04em; color: var(--text-2); }
+.ad-root .d-metric strong { margin: 0; font-size: 26px; line-height: 1.1; font-family: var(--font-display); letter-spacing: -.02em; }
+.ad-root .d-metric p { margin: 0; font-size: 13px; color: var(--text-2); }
+
+/* Cards */
+.ad-root .d-admin-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; margin: 0; }
+.ad-root .d-verification,
+.ad-root .d-ops-metrics,
+.ad-root .d-audit { margin: 0; padding: 16px; border-radius: 20px; }
+.ad-root .d-card-title { min-height: 0; align-items: flex-start; gap: 12px; margin-bottom: 4px; }
+.ad-root .d-card-title > div > span { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--text-2); }
+.ad-root .d-verification h3,
+.ad-root .d-ops-metrics h3,
+.ad-root .d-audit h3 { margin-top: 4px; font-size: 18px; line-height: 1.25; }
+
+/* Status pill. The legacy ".d-card-title > span:last-child" rule styled it as a red count badge. */
+.ad-root .d-card-title > .d-status,
+.ad-root .d-status {
+  min-width: 0; height: auto; padding: 6px 12px; gap: 6px; flex: none;
+  display: inline-flex; align-items: center; border-radius: 999px;
+  background: var(--surface-3); color: var(--text-2); font-size: 13px; font-weight: 700; line-height: 1.2;
+}
+.ad-root .d-status i { width: 8px; height: 8px; }
+.ad-root .d-status.d-status-warning { background: var(--ad-warn-bg); color: var(--ad-warn-fg); }
+.ad-root .d-status.d-status-repairing { background: var(--ad-ok-bg); color: var(--ad-ok-fg); }
+.ad-root .d-status.d-status-error { background: var(--error-bg); color: var(--error-text); }
+
+/* Error notes */
+.ad-root .d-error-note { margin: 12px 0; padding: 12px 14px; flex-wrap: wrap; gap: 8px; border-radius: 14px; font-size: 14px; line-height: 1.45; align-items: flex-start; }
+.ad-root .d-error-note > svg { flex: none; margin-top: 2px; }
+.ad-root .d-error-note span { flex: 1 1 180px; font-size: 14px; }
+.ad-root .d-error-note button { min-height: 44px; padding: 0 4px; font-size: 14px; font-weight: 700; text-decoration: underline; }
+.ad-root .d-state-note { margin: 12px 0 4px; font-size: 14px; color: var(--text-2); }
+
+/* Applications */
+.ad-root .d-applicant {
+  display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; align-items: start;
+  margin: 12px 0 0; padding: 14px 0 0; border-top: 1px solid var(--border); border-bottom: 0;
+}
+.ad-root .d-applicant > span {
+  width: 48px; height: 48px; border-radius: 14px; font-size: 15px; letter-spacing: .02em; color: #ffffff;
+}
+.ad-root .d-applicant > div { min-width: 0; }
+.ad-root .d-applicant h3 { font-size: 17px; line-height: 1.25; }
+.ad-root .d-applicant p { margin-top: 3px; font-size: 14px; color: var(--text-2); text-transform: capitalize; }
+.ad-root .d-applicant small { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
+.ad-root .d-review-actions { grid-column: 1 / -1; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ad-root .d-applicant .d-button {
+  width: auto; height: auto; min-height: 48px; padding: 0 14px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 15px; font-weight: 700;
+}
+.ad-root .d-applicant .d-button--success { background: var(--ad-solid-ok); color: var(--ad-solid-ok-fg); border: 0; }
+.ad-root .d-applicant .d-button--danger { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
+.ad-root .d-applicant .d-button:disabled { opacity: .55; }
+.ad-root .d-privacy-note { margin-top: 14px; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.ad-root .d-privacy-note > svg { flex: none; margin-top: 1px; }
+
+/* Platform totals */
+.ad-root .d-op-metric { min-height: 52px; grid-template-columns: 1fr auto; gap: 12px; }
+.ad-root .d-op-metric > span { font-size: 15px; color: var(--text-2); }
+.ad-root .d-op-metric strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+.ad-root .d-op-metric:last-child { border-bottom: 0; }
+
+/* Audit log */
+.ad-root .d-audit > div:not(.d-card-title) {
+  min-height: 0; padding: 12px 0; display: grid; align-items: center; gap: 2px 12px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-areas: "icon action time" "icon role time";
+}
+.ad-root .d-audit > div:not(.d-card-title) > span { grid-area: icon; width: 32px; height: 32px; }
+.ad-root .d-audit strong { grid-area: action; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.ad-root .d-audit small { grid-area: role; font-size: 13px; color: var(--muted); text-transform: capitalize; }
+.ad-root .d-audit time { grid-area: time; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }

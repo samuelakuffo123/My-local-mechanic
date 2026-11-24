@@ -1,4 +1,5 @@
 import "../provider/provider.css";
+import "./admin.css";
 import { useCallback, useState } from "react";
 import {
   AlertCircle,
@@ -10,6 +11,8 @@ import {
   Clock3,
   History,
   LoaderCircle,
+  LogOut,
+  RefreshCw,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -139,6 +142,11 @@ function AuditSkeleton() {
   );
 }
 
+function initialsOf(name: string) {
+  const parts = name.replace(/\(.*?\)/g, "").trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? parts[0]?.[1] ?? "")).toUpperCase() || "?";
+}
+
 function formatMoney(value: number) {
   return `GHS ${value.toLocaleString("en-GH", { maximumFractionDigits: 0 })}`;
 }
@@ -186,7 +194,7 @@ export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
   };
 
   return (
-    <div className="d-root">
+    <div className="d-root ad-root">
       <div className="d-page">
         <div className="d-page-heading">
           <div>
@@ -196,10 +204,10 @@ export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
           </div>
           <div className="d-heading-actions">
             <button aria-busy={refreshing} disabled={refreshing} type="button" onClick={refreshAll}>
-              <History className={refreshing ? "ui-spin" : ""} size={16} /> {refreshing ? "Refreshing…" : "Refresh"}
+              <RefreshCw className={refreshing ? "ui-spin" : ""} size={16} /> {refreshing ? "Refreshing…" : "Refresh"}
             </button>
             <button aria-label="Sign out" className="d-exit" onClick={onExit} type="button">
-              <ShieldCheck size={17} /> Sign out
+              <LogOut size={17} /> Sign out
             </button>
           </div>
         </div>
@@ -211,7 +219,7 @@ export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
                 ? "Checking provider applications…"
                 : pending.error
                   ? "Provider applications unavailable"
-                  : `${pending.data.length} provider application${pending.data.length === 1 ? "" : "s"} need review`}
+                  : `${pending.data.length} provider application${pending.data.length === 1 ? " needs" : "s need"} review`}
             </strong>
             <small>
               {pending.loading
@@ -260,7 +268,7 @@ export default function AdminWorkspace({ onExit }: { onExit: () => void }) {
             )}
             {!pending.loading && !pending.error && pending.data.map((provider) => (
               <div className="d-applicant" key={provider.id}>
-                <span>{provider.type.slice(0, 2).toUpperCase()}</span>
+                <span aria-hidden="true">{initialsOf(provider.businessName)}</span>
                 <div>
                   <h3>{provider.businessName}</h3>
                   <p>{provider.type} · {provider.region ?? "Region not set"}</p>
