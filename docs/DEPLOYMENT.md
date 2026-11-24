@@ -28,8 +28,9 @@ The API picks its driver at startup:
 
 | Condition | Driver |
 |---|---|
+| `DATABASE_PATH` explicitly set | `node:sqlite` (override, even if `DATABASE_URL` exists) |
 | `DATABASE_URL` set | Postgres via `pg` (production) |
-| `DATABASE_PATH=":memory:"` or no `DATABASE_URL` | `node:sqlite` (tests/local) |
+| No database environment variables | `node:sqlite` at `.data/mechnow.sqlite` (local) |
 
 Migrations are append-only and stored in `schema_migrations`. They run at boot
 over `DATABASE_URL_UNPOOLED` (falling back to `DATABASE_URL`), because PgBouncer

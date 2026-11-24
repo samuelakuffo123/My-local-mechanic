@@ -48,8 +48,10 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL?.trim() ?? "",
   databaseUrlUnpooled: process.env.DATABASE_URL_UNPOOLED?.trim() ?? "",
 
-  // SQLite file used for local development and the API tests.
-  databasePath: process.env.DATABASE_PATH ?? ".data/mechnow.sqlite",
+  // SQLite file used for local development and the API tests. An explicitly
+  // set DATABASE_PATH overrides DATABASE_URL so local runs can force SQLite.
+  databasePath: process.env.DATABASE_PATH?.trim() || ".data/mechnow.sqlite",
+  databasePathExplicit: Boolean(process.env.DATABASE_PATH?.trim()),
 
   // Comma-separated list of allowed browser origins.
   corsOrigins,

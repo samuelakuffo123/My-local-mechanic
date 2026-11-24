@@ -11,7 +11,7 @@ npm run api
 npm run dev
 ```
 
-The API listens on `127.0.0.1:8787`; Vite proxies `/api` requests to it. SQLite data is stored in `.data/mechnow.sqlite` by default. Override `DATABASE_PATH` or `API_PORT` as needed.
+The API listens on `127.0.0.1:8787`; Vite proxies `/api` requests to it. SQLite data is stored in `.data/mechnow.sqlite` by default. Override `DATABASE_PATH` or `API_PORT` as needed. Setting `DATABASE_PATH` explicitly forces SQLite even if `DATABASE_URL` is also present, which is useful for local testing against a Neon-backed shell environment.
 
 The discovery map only shows verified providers that have coordinates. For a populated local map, start the API with demo data: `SEED_DEMO_DATA=true npm run api` on macOS/Linux, or `$env:SEED_DEMO_DATA="true"; npm run api` in PowerShell. Demo data is refused when `NODE_ENV=production`.
 

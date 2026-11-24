@@ -10,8 +10,8 @@ import { bootstrapAdmin, seedDemoData } from "./seed.ts";
 import { createStaticHandler } from "./static.ts";
 
 async function main() {
-  // With no explicit path, DATABASE_URL selects Postgres and anything else
-  // falls back to the local SQLite file.
+  // An explicit DATABASE_PATH selects SQLite even when DATABASE_URL is set;
+  // otherwise DATABASE_URL selects Postgres.
   await openDatabase();
   console.log(`[api] database driver: ${databaseDriver()}`);
   registerRoutes();

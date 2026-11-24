@@ -7,11 +7,12 @@ import { config } from "./config.ts";
 
 // Data-access layer with two drivers behind one async interface:
 //
-//   * Postgres (`pg`) — used whenever DATABASE_URL is set. Neon's guidance is to
-//     run migrations over the direct/unpooled URL, because PgBouncer's
-//     transaction mode does not preserve session state.
-//   * SQLite (`node:sqlite`) — local development and the API tests, so the suite
-//     stays fast and can never touch a shared database.
+//   * Postgres (`pg`) — used when DATABASE_URL is set and DATABASE_PATH is not
+//     explicitly set. Neon's guidance is to run migrations over the
+//     direct/unpooled URL, because PgBouncer's transaction mode does not
+//     preserve session state.
+//   * SQLite (`node:sqlite`) — local development and the API tests. An explicit
+//     DATABASE_PATH always selects SQLite, even when DATABASE_URL is present.
 //
 // Domain code only depends on `all/get/run/tx`, so it stays driver-agnostic.
 
@@ -462,7 +463,7 @@ async function migratePostgres(connectionString: string) {
 export async function openDatabase(databasePath?: string): Promise<void> {
   if (executor) return;
 
-  if (databasePath === undefined && config.databaseUrl) {
+  if (databasePath === undefined && !config.databasePathExplicit && config.databaseUrl) {
     const created = createPool(config.databaseUrl, 10);
     await migratePostgres(config.databaseUrlUnpooled || config.databaseUrl);
     pool = created;
