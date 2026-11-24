@@ -395,7 +395,7 @@ const migrations: { version: number; name: string; sql: string }[] = [
   {
     version: 6,
     name: "provider_managed_otp",
-    sql: `ALTER TABLE otp_codes ADD COLUMN provider_managed BOOLEAN NOT NULL DEFAULT 0;`,
+    sql: `ALTER TABLE otp_codes ADD COLUMN provider_managed BOOLEAN NOT NULL DEFAULT FALSE;`,
   },
 ];
 
