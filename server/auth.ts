@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { config } from "./config.ts";
 import { all, get, run, tx } from "./db.ts";
 import { AppError, forbidden, tooMany, unauthorized, badRequest } from "./errors.ts";
-import { deliverOtp, providerManagesOtp, verifyProviderOtp, PROVIDER_OTP_INVALID } from "./sms.ts";
+import { deliverOtp, verifyProviderOtp, PROVIDER_OTP_INVALID } from "./sms.ts";
 import { auditFrom } from "./audit.ts";
 import {
   addHours,
@@ -53,18 +53,18 @@ export async function requestOtp(rawPhone: string, ip: string): Promise<{ devCod
   if (!rateLimit(`otp:phone:${phone}`, 5, 15 * 60_000)) throw tooMany("Too many codes requested for this number. Try again later.");
   if (!rateLimit(`otp:ip:${ip}`, 20, 60 * 60_000)) throw tooMany("Too many codes requested. Try again later.");
 
-  // Arkesel's OTP API generates the code itself; the console adapter keeps the
-  // existing locally generated code for development and tests.
-  const managed = providerManagesOtp();
-  const code = managed ? undefined : String(randomInt(100000, 999999));
+  // Always have a local code ready. The console adapter and the Arkesel legacy
+  // SMS fallback use it; Arkesel's OTP API ignores it and generates its own.
+  const code = String(randomInt(100000, 999999));
   const delivery = await deliverOtp(phone, code);
   const expiresAt = addMinutes(new Date(), config.otpTtlMinutes).toISOString();
   // Provider-managed OTPs have no local plaintext code. Bind the record to the
   // gateway reference so it cannot be replayed after a successful verification.
-  const codeHash = managed ? sha256(`${phone}:${delivery.providerRef}`) : otpHash(phone, code as string);
+  const codeHash = delivery.managed ? sha256(`${phone}:${delivery.providerRef}`) : otpHash(phone, code);
   await run(
-    `INSERT INTO otp_codes (id, phone, code_hash, attempts, expires_at, consumed_at, created_at) VALUES (?, ?, ?, 0, ?, NULL, ?)`,
-    [newId(), phone, codeHash, expiresAt, nowIso()],
+    `INSERT INTO otp_codes (id, phone, code_hash, provider_managed, attempts, expires_at, consumed_at, created_at)
+     VALUES (?, ?, ?, ?, 0, ?, NULL, ?)`,
+    [newId(), phone, codeHash, delivery.managed ? 1 : 0, expiresAt, nowIso()],
   );
 
   const devCode = config.env === "production" ? undefined : delivery.devCode;
@@ -77,8 +77,15 @@ export async function verifyOtp(rawPhone: string, code: string, options: { name?
   const phone = normalisePhone(rawPhone);
   if (!rateLimit(`verify:phone:${phone}`, 10, 15 * 60_000)) throw tooMany();
 
-  const record = await get<{ id: string; code_hash: string; attempts: number; expires_at: string; consumed_at: string | null }>(
-    `SELECT id, code_hash, attempts, expires_at, consumed_at FROM otp_codes
+  const record = await get<{
+    id: string;
+    code_hash: string;
+    provider_managed: number | boolean;
+    attempts: number;
+    expires_at: string;
+    consumed_at: string | null;
+  }>(
+    `SELECT id, code_hash, provider_managed, attempts, expires_at, consumed_at FROM otp_codes
      WHERE phone = ? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
     [phone],
   );
@@ -86,7 +93,7 @@ export async function verifyOtp(rawPhone: string, code: string, options: { name?
   if (record.consumed_at) throw badRequest("That code has already been used.");
   if (new Date(record.expires_at).getTime() <= Date.now()) throw badRequest("That code has expired. Request a new one.");
   if (record.attempts >= config.otpMaxAttempts) throw tooMany("Too many incorrect attempts. Request a new code.");
-  if (providerManagesOtp()) {
+  if (record.provider_managed) {
     try {
       await verifyProviderOtp(phone, code);
     } catch (caught) {

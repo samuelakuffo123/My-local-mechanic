@@ -15,7 +15,9 @@ const RESEND_SECONDS = 30;
 
 function isSmsDeliveryError(error: unknown): boolean {
   return error instanceof ApiError &&
-    (error.code === "sms_provider_failed" || error.code === "sms_unconfigured");
+    (error.code === "sms_provider_failed" ||
+      error.code === "sms_unconfigured" ||
+      error.code === "sms_invalid_key");
 }
 
 const ROLES: { value: Role; label: string }[] = [

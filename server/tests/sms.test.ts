@@ -44,6 +44,17 @@ function mockFetch(responses: Array<{ status?: number; body: Record<string, unkn
   return calls;
 }
 
+function silenceLogs() {
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = () => undefined;
+  console.warn = () => undefined;
+  return () => {
+    console.error = originalError;
+    console.warn = originalWarn;
+  };
+}
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
   if (mutableConfig && originalConfig) Object.assign(mutableConfig, originalConfig);
@@ -62,9 +73,10 @@ test("Arkesel OTP generate uses the OTP endpoint and a %otp_code% slot", async (
   const { deliverOtp, providerManagesOtp } = await import("../sms.ts");
 
   assert.equal(providerManagesOtp(), true);
-  const result = await deliverOtp("+233244000001");
+  const result = await deliverOtp("+233244000001", "123456");
 
   assert.equal(result.providerRef, "otp_123");
+  assert.equal(result.managed, true);
   assert.equal(result.devCode, undefined, "provider-managed codes are never returned to the client");
   assert.equal(calls[0]?.url, "https://sms.arkesel.com/api/otp/generate");
 
@@ -79,6 +91,35 @@ test("Arkesel OTP generate uses the OTP endpoint and a %otp_code% slot", async (
   assert.equal(payload.type, "numeric");
   assert.equal(payload.sender_id, "MechNow");
   assert.match(payload.message, /%otp_code%/, "Arkesel must insert its own generated code");
+});
+
+test("invalid OTP keys fall back to Arkesel's legacy SMS endpoint with a local code", async () => {
+  await useArkeselConfig();
+  const restoreLogs = silenceLogs();
+  try {
+    const calls = mockFetch([
+      { status: 401, body: { message: "Invalid key" } },
+      { body: { code: "ok", message: "Successfully Sent" } },
+    ]);
+    const { deliverOtp } = await import("../sms.ts");
+
+    const result = await deliverOtp("+233244000001", "482913");
+
+    assert.equal(calls[0]?.url, "https://sms.arkesel.com/api/otp/generate");
+    const legacy = new URL(calls[1]?.url ?? "");
+    assert.equal(legacy.origin + legacy.pathname, "https://sms.arkesel.com/sms/api");
+    assert.equal(legacy.searchParams.get("action"), "send-sms");
+    assert.equal(legacy.searchParams.get("api_key"), "test-api-key");
+    assert.equal(legacy.searchParams.get("to"), "233244000001");
+    assert.equal(legacy.searchParams.get("from"), "MechNow");
+    assert.match(legacy.searchParams.get("sms") ?? "", /482913/);
+
+    assert.equal(result.managed, false, "legacy SMS codes are verified locally");
+    assert.match(result.providerRef, /^arkesel-sms-/);
+    assert.equal(result.devCode, undefined);
+  } finally {
+    restoreLogs();
+  }
 });
 
 test("Arkesel verify maps success, invalid and expired codes safely", async () => {
@@ -124,22 +165,23 @@ test("Arkesel verify maps success, invalid and expired codes safely", async () =
   });
 });
 
-test("Arkesel credential failures become safe structured 503s", async () => {
+test("credential and gateway failures become safe structured 503s", async () => {
   await useArkeselConfig("test-api-key");
-
-  const originalConsoleError = console.error;
-  console.error = () => undefined;
+  const restoreLogs = silenceLogs();
   try {
     const { AppError } = await import("../errors.ts");
     const { deliverOtp } = await import("../sms.ts");
 
-    mockFetch([{ status: 401, body: { code: "401", message: "Invalid key" } }]);
+    mockFetch([
+      { status: 401, body: { code: "401", message: "Invalid key" } },
+      { status: 401, body: { code: "102", message: "Authentication Failed" } },
+    ]);
     await assert.rejects(
-      deliverOtp("+233244000001"),
+      deliverOtp("+233244000001", "123456"),
       (error: unknown) => {
         assert.ok(error instanceof AppError);
         assert.equal(error.status, 503);
-        assert.equal(error.code, "sms_provider_failed");
+        assert.equal(error.code, "sms_invalid_key");
         assert.equal(error.message, "We couldn't send your verification code. Try again in a moment.");
         assert.doesNotMatch(error.message, /Invalid key/i, "provider details stay out of the browser response");
         return true;
@@ -148,7 +190,7 @@ test("Arkesel credential failures become safe structured 503s", async () => {
 
     mockFetch([{ body: { code: "1004", message: "SMS gateway not active or credential not found" } }]);
     await assert.rejects(
-      deliverOtp("+233244000001"),
+      deliverOtp("+233244000001", "123456"),
       (error: unknown) => {
         assert.ok(error instanceof AppError);
         assert.equal(error.status, 503);
@@ -157,6 +199,6 @@ test("Arkesel credential failures become safe structured 503s", async () => {
       },
     );
   } finally {
-    console.error = originalConsoleError;
+    restoreLogs();
   }
 });

@@ -75,8 +75,9 @@ services:
       - key: PAYSTACK_WEBHOOK_SECRET
         sync: false
       # Phone OTP delivery through Arkesel's /api/otp/generate + /api/otp/verify
-      # endpoints. OTP requires the Main SMS API Key, not a Multiple API Key.
-      # Register the sender ID and keep credits topped up before public signup.
+      # endpoints, with a fallback to /sms/api for keys that only support plain
+      # SMS. The OTP path requires the Main SMS API Key. Register the sender ID
+      # and keep credits topped up before public signup.
       - key: SMS_PROVIDER
         value: arkesel
       - key: ARKESEL_API_KEY

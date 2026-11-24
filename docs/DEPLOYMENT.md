@@ -136,8 +136,11 @@ These fail loudly rather than pretending to work:
    and `/api/otp/verify` checks it server-side. Use the **Main SMS API Key**
    from your Arkesel dashboard — OTP will not work with a Multiple API Key.
    Register the `MechNow` sender ID, set `SMS_PROVIDER=arkesel` plus
-   `ARKESEL_API_KEY`, and keep credits topped up. Google sign-in works without
-   SMS when `GOOGLE_CLIENT_ID` and the authorized origin are configured.
+   `ARKESEL_API_KEY`, and keep credits topped up. If the OTP API rejects the key,
+   MechNow automatically falls back to Arkesel's legacy `/sms/api` plain-SMS
+   endpoint and verifies its own locally generated code. Google sign-in also
+   works without SMS when `GOOGLE_CLIENT_ID` and the authorized origin are
+   configured.
 2. **Payments.** The development adapter is hard-disabled in production. Live
    payments need Paystack keys and a verified webhook.
 3. **Demo map data.** `SEED_DEMO_DATA` is refused in production, so the nearby

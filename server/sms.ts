@@ -4,12 +4,18 @@ import { AppError } from "./errors.ts";
 // OTP delivery boundary.
 //
 // Local development uses the "console" adapter: MechNow generates the code,
-// logs it and returns devCode so the UI can show it. Production uses Arkesel's
-// OTP API, which generates and verifies the code itself. In that mode MechNow
-// never sees the plaintext code and never returns it to the browser.
+// logs it and returns devCode so the UI can show it.
+//
+// Production tries Arkesel's OTP API first, where Arkesel generates and
+// verifies the code. Some Arkesel accounts only have a key for the older
+// plain-SMS API; in that case MechNow generates its own code, sends it through
+// the legacy endpoint and verifies it locally. Plaintext codes are never
+// returned to the browser in production.
 
 export interface OtpRequestResult {
   providerRef: string;
+  /** True when Arkesel generated (and will verify) the code. */
+  managed: boolean;
   devCode?: string;
 }
 
@@ -33,11 +39,20 @@ function smsNotConfigured(): AppError {
   return new AppError(SMS_NOT_CONFIGURED, 503, "sms_unconfigured");
 }
 
-function arkeselFailure(action: "generate" | "verify", detail: string): AppError {
+function logArkeselFailure(action: string, detail: string) {
   // Keep the provider's reason in server logs for diagnostics, but never send
   // raw gateway text (which can contain account details) to the browser.
   console.error(`[sms] Arkesel ${action} failed: ${detail.slice(0, 200)}`);
+}
+
+function arkeselFailure(action: string, detail: string): AppError {
+  logArkeselFailure(action, detail);
   return new AppError(SMS_UNAVAILABLE, 503, "sms_provider_failed");
+}
+
+function arkeselCredentialFailure(action: string, detail: string): AppError {
+  logArkeselFailure(action, detail);
+  return new AppError(SMS_UNAVAILABLE, 503, "sms_invalid_key");
 }
 
 function invalidPhone(): AppError {
@@ -49,15 +64,20 @@ function responseCode(data: ArkeselResponse | null): string {
   return value === undefined || value === null ? "" : String(value).trim();
 }
 
-/** Arkesel's OTP API expects digits only, with no leading +. */
+/** Arkesel's OTP and legacy SMS APIs expect digits only, with no leading +. */
 function arkeselNumber(phone: string): string {
   return phone.replace(/^\+/, "");
+}
+
+function isCredentialFailure(code: string, detail: string): boolean {
+  return code === "401" || code === "102" || /invalid key|authentication failed/i.test(detail);
 }
 
 async function arkeselPost(path: string, payload: Record<string, unknown>): Promise<ArkeselResponse> {
   const apiKey = config.arkeselApiKey.trim();
   if (!apiKey) throw smsNotConfigured();
 
+  const action = path.includes("verify") ? "verify" : "generate";
   let response: Response;
   try {
     response = await fetch(`https://sms.arkesel.com${path}`, {
@@ -70,7 +90,7 @@ async function arkeselPost(path: string, payload: Record<string, unknown>): Prom
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
-    throw arkeselFailure(path.includes("verify") ? "verify" : "generate", "gateway unreachable");
+    throw arkeselFailure(action, "gateway unreachable");
   }
 
   let data: ArkeselResponse | null = null;
@@ -82,10 +102,9 @@ async function arkeselPost(path: string, payload: Record<string, unknown>): Prom
 
   const code = responseCode(data);
   if (!response.ok || code === "401") {
-    throw arkeselFailure(
-      path.includes("verify") ? "verify" : "generate",
-      code === "401" ? "invalid api key" : data?.message ?? `HTTP ${response.status}`,
-    );
+    const detail = code === "401" ? "invalid api key" : data?.message ?? `HTTP ${response.status}`;
+    if (isCredentialFailure(code, detail)) throw arkeselCredentialFailure(action, detail);
+    throw arkeselFailure(action, detail);
   }
   return data ?? {};
 }
@@ -108,6 +127,7 @@ function generateFailure(data: ArkeselResponse): AppError {
     case "1008":
     case "1011":
     default:
+      if (isCredentialFailure(code, detail)) return arkeselCredentialFailure("generate", detail);
       return arkeselFailure("generate", detail);
   }
 }
@@ -130,18 +150,59 @@ async function arkeselGenerate(phone: string): Promise<OtpRequestResult> {
   if (responseCode(data) !== "1000") throw generateFailure(data);
   return {
     providerRef: String(data.data?.id ?? data.data?.message_id ?? `arkesel-otp-${Date.now()}`),
+    managed: true,
   };
 }
 
-/** True when the provider generates and verifies the code, not MechNow. */
+/**
+ * Older Arkesel accounts may only have a key for the plain-SMS endpoint:
+ *   https://sms.arkesel.com/sms/api?action=send-sms&api_key=...&to=...&from=...&sms=...
+ * MechNow generates the code and verifies it locally in this mode.
+ */
+async function arkeselLegacySms(phone: string, code: string): Promise<string> {
+  const apiKey = config.arkeselApiKey.trim();
+  if (!apiKey) throw smsNotConfigured();
+
+  const expiry = Math.min(10, Math.max(1, Math.trunc(config.otpTtlMinutes) || 5));
+  const message = `MechNow: your verification code is ${code}. It expires in ${expiry} minutes. Never share this code.`;
+  const url = new URL("https://sms.arkesel.com/sms/api");
+  url.searchParams.set("action", "send-sms");
+  url.searchParams.set("api_key", apiKey);
+  url.searchParams.set("to", arkeselNumber(phone));
+  url.searchParams.set("from", config.smsSenderId.trim().slice(0, 11) || "MechNow");
+  url.searchParams.set("sms", message);
+
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  } catch {
+    throw arkeselFailure("send", "gateway unreachable");
+  }
+
+  const raw = await response.text();
+  let data: ArkeselResponse | null = null;
+  try {
+    data = JSON.parse(raw) as ArkeselResponse;
+  } catch {
+    // Plain-text success responses are accepted when HTTP status is OK.
+  }
+
+  const codeValue = responseCode(data).toLowerCase();
+  const messageValue = data?.message ?? raw;
+  if (!response.ok || (codeValue && codeValue !== "ok" && !codeValue.startsWith("success"))) {
+    if (isCredentialFailure(codeValue, messageValue)) throw arkeselCredentialFailure("send", messageValue);
+    throw arkeselFailure("send", messageValue);
+  }
+
+  return `arkesel-sms-${Date.now()}`;
+}
+
+/** True when the configured OTP adapter can verify codes through the provider. */
 export function providerManagesOtp(): boolean {
   return config.smsProvider === "arkesel";
 }
 
-/**
- * Sends an OTP. For the console adapter, `code` is required. For Arkesel it is
- * omitted because the OTP API generates the code server-side.
- */
+/** Sends an OTP, trying provider-managed OTP first when Arkesel is configured. */
 export async function deliverOtp(phone: string, code?: string): Promise<OtpRequestResult> {
   if (config.smsProvider === "console") {
     if (isProduction) throw smsNotConfigured();
@@ -149,18 +210,31 @@ export async function deliverOtp(phone: string, code?: string): Promise<OtpReque
     const body = `MechNow: your verification code is ${code}. It expires in ${config.otpTtlMinutes} minutes. Never share this code.`;
     // eslint-disable-next-line no-console
     console.log(`[sms:console] to=${phone} body="${body}"`);
-    return { providerRef: `console-${Date.now()}`, devCode: code };
+    return { providerRef: `console-${Date.now()}`, managed: false, devCode: code };
   }
 
-  if (config.smsProvider === "arkesel") return await arkeselGenerate(phone);
+  if (config.smsProvider === "arkesel") {
+    // Always have a local code ready in case the OTP API rejects the key.
+    if (!code) throw new Error("Arkesel fallback requires a locally generated code.");
+    try {
+      return await arkeselGenerate(phone);
+    } catch (error) {
+      if (error instanceof AppError && error.code === "sms_invalid_key") {
+        console.warn("[sms] Arkesel OTP API rejected the key; using the legacy SMS API with a local code.");
+        const providerRef = await arkeselLegacySms(phone, code);
+        return { providerRef, managed: false };
+      }
+      throw error;
+    }
+  }
 
   console.error(`[sms] Unknown SMS provider: ${config.smsProvider}`);
   throw smsNotConfigured();
 }
 
 /**
- * Verifies a provider-managed code. The console adapter has no remote check;
- * MechNow validates its own hash in auth.ts.
+ * Verifies a provider-managed code. Local and legacy-SMS codes are verified
+ * against the local hash in auth.ts, so this is a no-op in those modes.
  */
 export async function verifyProviderOtp(phone: string, code: string): Promise<void> {
   if (!providerManagesOtp()) return;
