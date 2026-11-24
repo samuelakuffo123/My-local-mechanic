@@ -17,7 +17,8 @@ function isSmsDeliveryError(error: unknown): boolean {
   return error instanceof ApiError &&
     (error.code === "sms_provider_failed" ||
       error.code === "sms_unconfigured" ||
-      error.code === "sms_invalid_key");
+      error.code === "sms_invalid_key" ||
+      error.code === "sms_insufficient_balance");
 }
 
 const ROLES: { value: Role; label: string }[] = [

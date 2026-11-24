@@ -29,16 +29,23 @@ async function useArkeselConfig(apiKey = "  test-api-key  ") {
   });
 }
 
-function mockFetch(responses: Array<{ status?: number; body: Record<string, unknown> }>) {
+interface MockResponse {
+  status?: number;
+  body?: Record<string, unknown>;
+  text?: string;
+}
+
+function mockFetch(responses: MockResponse[]) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   let index = 0;
   globalThis.fetch = (async (input, init) => {
     calls.push({ url: String(input), init: init ?? {} });
     const response = responses[Math.min(index, responses.length - 1)];
     index += 1;
-    return new Response(JSON.stringify(response.body), {
+    const raw = response.text ?? JSON.stringify(response.body ?? {});
+    return new Response(raw, {
       status: response.status ?? 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": response.text ? "text/plain" : "application/json" },
     });
   }) as typeof fetch;
   return calls;
@@ -111,12 +118,54 @@ test("invalid OTP keys fall back to Arkesel's legacy SMS endpoint with a local c
     assert.equal(legacy.searchParams.get("action"), "send-sms");
     assert.equal(legacy.searchParams.get("api_key"), "test-api-key");
     assert.equal(legacy.searchParams.get("to"), "233244000001");
-    assert.equal(legacy.searchParams.get("from"), "MechNow");
+    assert.equal(legacy.searchParams.get("from"), "MechNow", "recipients see the MechNow sender ID");
+    assert.equal(legacy.searchParams.get("response"), "json");
+    assert.match(legacy.searchParams.get("sms") ?? "", /^MechNow:/, "the message itself is branded too");
     assert.match(legacy.searchParams.get("sms") ?? "", /482913/);
 
     assert.equal(result.managed, false, "legacy SMS codes are verified locally");
     assert.match(result.providerRef, /^arkesel-sms-/);
     assert.equal(result.devCode, undefined);
+  } finally {
+    restoreLogs();
+  }
+});
+
+test("low balance is reported instead of being treated as a sent OTP", async () => {
+  await useArkeselConfig("test-api-key");
+  const restoreLogs = silenceLogs();
+  try {
+    const { AppError } = await import("../errors.ts");
+    const { deliverOtp } = await import("../sms.ts");
+
+    const otpCalls = mockFetch([{ body: { code: "1007", message: "Insufficient balance" } }]);
+    await assert.rejects(
+      deliverOtp("+233244000001", "123456"),
+      (error: unknown) => {
+        assert.ok(error instanceof AppError);
+        assert.equal(error.status, 503);
+        assert.equal(error.code, "sms_insufficient_balance");
+        assert.match(error.message, /SMS credit is unavailable/i);
+        assert.doesNotMatch(error.message, /Arkesel|balance/i);
+        return true;
+      },
+    );
+    assert.equal(otpCalls.length, 1, "a low Main Balance must not trigger the paid SMS fallback");
+
+    const legacyCalls = mockFetch([
+      { status: 401, body: { message: "Invalid key" } },
+      { text: "Your main balance is depleting. Please top up." },
+    ]);
+    await assert.rejects(
+      deliverOtp("+233244000001", "123456"),
+      (error: unknown) => {
+        assert.ok(error instanceof AppError);
+        assert.equal(error.status, 503);
+        assert.equal(error.code, "sms_insufficient_balance");
+        return true;
+      },
+    );
+    assert.equal(legacyCalls.length, 2);
   } finally {
     restoreLogs();
   }

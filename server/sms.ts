@@ -20,6 +20,7 @@ export interface OtpRequestResult {
 }
 
 export const PROVIDER_OTP_INVALID = "otp_invalid";
+export const SMS_INSUFFICIENT_BALANCE = "sms_insufficient_balance";
 
 interface ArkeselResponse {
   code?: string | number;
@@ -33,6 +34,7 @@ interface ArkeselResponse {
 
 const SMS_NOT_CONFIGURED = "SMS verification isn't configured for this server. Contact support.";
 const SMS_UNAVAILABLE = "We couldn't send your verification code. Try again in a moment.";
+const SMS_NO_CREDIT = "SMS credit is unavailable right now. Try again later or sign in with Google.";
 const PHONE_ERROR = "Enter a valid Ghanaian phone number, like 024 123 4567.";
 
 function smsNotConfigured(): AppError {
@@ -55,6 +57,11 @@ function arkeselCredentialFailure(action: string, detail: string): AppError {
   return new AppError(SMS_UNAVAILABLE, 503, "sms_invalid_key");
 }
 
+function insufficientBalance(action: string, detail: string): AppError {
+  logArkeselFailure(action, detail);
+  return new AppError(SMS_NO_CREDIT, 503, SMS_INSUFFICIENT_BALANCE);
+}
+
 function invalidPhone(): AppError {
   return new AppError(PHONE_ERROR, 400, "otp_invalid_phone");
 }
@@ -71,6 +78,20 @@ function arkeselNumber(phone: string): string {
 
 function isCredentialFailure(code: string, detail: string): boolean {
   return code === "401" || code === "102" || /invalid key|authentication failed/i.test(detail);
+}
+
+/** Arkesel uses 1007/1008 for OTP and descriptive text on the legacy API. */
+function isInsufficientBalance(code: string, detail: string): boolean {
+  return (
+    code === "1007" ||
+    code === "1008" ||
+    /insufficient|low balance|balance.{0,30}(deplet|low|exhaust|not enough)|not enough (credit|balance)|out of (credit|balance)|no (sms )?credit|credit.{0,20}(deplet|exhaust|low)/i.test(detail)
+  );
+}
+
+/** Plain-text legacy responses need checking too; JSON has a `code` field. */
+function isPlainTextFailure(detail: string): boolean {
+  return /fail|error|invalid|unauthori[sz]ed|authentication|blocked|denied|suspend|spam|hold|not sent|rejected/i.test(detail) || isInsufficientBalance("", detail);
 }
 
 async function arkeselPost(path: string, payload: Record<string, unknown>): Promise<ArkeselResponse> {
@@ -104,6 +125,7 @@ async function arkeselPost(path: string, payload: Record<string, unknown>): Prom
   if (!response.ok || code === "401") {
     const detail = code === "401" ? "invalid api key" : data?.message ?? `HTTP ${response.status}`;
     if (isCredentialFailure(code, detail)) throw arkeselCredentialFailure(action, detail);
+    if (isInsufficientBalance(code, detail)) throw insufficientBalance(action, detail);
     throw arkeselFailure(action, detail);
   }
   return data ?? {};
@@ -119,15 +141,17 @@ function generateFailure(data: ArkeselResponse): AppError {
       return smsNotConfigured();
     case "1005":
       return invalidPhone();
+    case "1007":
+    case "1008":
+      return insufficientBalance("generate", detail);
     case "1001":
     case "1002":
     case "1003":
     case "1006":
-    case "1007":
-    case "1008":
     case "1011":
     default:
       if (isCredentialFailure(code, detail)) return arkeselCredentialFailure("generate", detail);
+      if (isInsufficientBalance(code, detail)) return insufficientBalance("generate", detail);
       return arkeselFailure("generate", detail);
   }
 }
@@ -171,6 +195,8 @@ async function arkeselLegacySms(phone: string, code: string): Promise<string> {
   url.searchParams.set("to", arkeselNumber(phone));
   url.searchParams.set("from", config.smsSenderId.trim().slice(0, 11) || "MechNow");
   url.searchParams.set("sms", message);
+  // Ask for JSON so failures such as low balance are not mistaken for success.
+  url.searchParams.set("response", "json");
 
   let response: Response;
   try {
@@ -188,10 +214,16 @@ async function arkeselLegacySms(phone: string, code: string): Promise<string> {
   }
 
   const codeValue = responseCode(data).toLowerCase();
-  const messageValue = data?.message ?? raw;
-  if (!response.ok || (codeValue && codeValue !== "ok" && !codeValue.startsWith("success"))) {
+  const messageValue = (data?.message ?? raw ?? "").trim();
+  const failed =
+    !response.ok ||
+    (codeValue !== "" && codeValue !== "ok" && !codeValue.startsWith("success")) ||
+    (codeValue === "" && isPlainTextFailure(messageValue)) ||
+    isInsufficientBalance(codeValue, messageValue);
+  if (failed) {
     if (isCredentialFailure(codeValue, messageValue)) throw arkeselCredentialFailure("send", messageValue);
-    throw arkeselFailure("send", messageValue);
+    if (isInsufficientBalance(codeValue, messageValue)) throw insufficientBalance("send", messageValue);
+    throw arkeselFailure("send", messageValue || `HTTP ${response.status}`);
   }
 
   return `arkesel-sms-${Date.now()}`;
