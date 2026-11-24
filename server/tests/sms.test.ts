@@ -12,6 +12,7 @@ type MutableSmsConfig = {
   smsSenderId: string;
   arkeselApiKey: string;
   otpTtlMinutes: number;
+  publicOrigin: string;
 };
 
 let mutableConfig: MutableSmsConfig | null = null;
@@ -26,6 +27,7 @@ async function useArkeselConfig(apiKey = "  test-api-key  ") {
     smsSenderId: "MechNow",
     arkeselApiKey: apiKey,
     otpTtlMinutes: 5,
+    publicOrigin: "https://mechnow.onrender.com",
   });
 }
 
@@ -98,6 +100,11 @@ test("Arkesel OTP generate uses the OTP endpoint and a %otp_code% slot", async (
   assert.equal(payload.type, "numeric");
   assert.equal(payload.sender_id, "MechNow");
   assert.match(payload.message, /%otp_code%/, "Arkesel must insert its own generated code");
+  assert.match(
+    payload.message,
+    /@mechnow\.onrender\.com #%otp_code%$/,
+    "the final line binds the code to the site for SMS autofill",
+  );
 });
 
 test("invalid OTP keys fall back to Arkesel's legacy SMS endpoint with a local code", async () => {
@@ -122,6 +129,11 @@ test("invalid OTP keys fall back to Arkesel's legacy SMS endpoint with a local c
     assert.equal(legacy.searchParams.get("response"), "json");
     assert.match(legacy.searchParams.get("sms") ?? "", /^MechNow:/, "the message itself is branded too");
     assert.match(legacy.searchParams.get("sms") ?? "", /482913/);
+    assert.match(
+      legacy.searchParams.get("sms") ?? "",
+      /@mechnow\.onrender\.com #482913$/,
+      "fallback codes are domain-bound for autofill too",
+    );
 
     assert.equal(result.managed, false, "legacy SMS codes are verified locally");
     assert.match(result.providerRef, /^arkesel-sms-/);

@@ -110,7 +110,7 @@ Add the same URL to Google's authorized origins and Mapbox's URL restrictions.
 | `API_PORT` or `PORT` | yes | Render injects `PORT`; the API prefers `API_PORT` |
 | `DATABASE_URL` | production | Neon **pooled** connection string |
 | `DATABASE_URL_UNPOOLED` | production | Neon **direct** connection string for migrations |
-| `PUBLIC_ORIGIN` | custom domains | Public HTTPS origin allowed by CORS |
+| `PUBLIC_ORIGIN` | custom domains | Public HTTPS origin for CORS and domain-bound OTP autofill |
 | `CORS_ORIGINS` | optional | Extra comma-separated origins |
 | `TRUST_PROXY=true` | behind a proxy | Trust `X-Forwarded-For` for rate limiting |
 | `VITE_MAPBOX_ACCESS_TOKEN` | build time | Public Mapbox token |
@@ -151,6 +151,12 @@ These fail loudly rather than pretending to work:
    logs include `[sms] Arkesel ... responded in Nms`; a fast response here means
    any remaining delay is in Arkesel's carrier delivery. Slow or queued delivery
    is usually caused by a low Main Balance or an unapproved sender ID.
+   Each SMS ends with `@domain #code` (using `PUBLIC_ORIGIN` or Render's
+   `RENDER_EXTERNAL_URL`), so iOS Safari's `autocomplete="one-time-code"` can
+   suggest the code and Chromium's WebOTP API can fill it automatically on
+   HTTPS. The verification screen shows “Code filled from your messages” with
+   an “Enter manually” link when that happens; browsers without support keep
+   the normal manual entry path.
 2. **Payments.** The development adapter is hard-disabled in production. Live
    payments need Paystack keys and a verified webhook.
 3. **Demo map data.** `SEED_DEMO_DATA` is refused in production, so the nearby

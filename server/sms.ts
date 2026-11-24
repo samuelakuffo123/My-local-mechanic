@@ -80,6 +80,21 @@ function arkeselNumber(phone: string): string {
   return phone.replace(/^\+/, "");
 }
 
+/**
+ * WebOTP and Safari's SMS autofill only release a code when the message ends
+ * with `@domain #code`. Without a public origin (local dev) no annotation is
+ * added, so the messages stay harmless outside the deployed site.
+ */
+function otpAnnotation(codeSlot: string): string {
+  if (!config.publicOrigin) return "";
+  try {
+    const domain = new URL(config.publicOrigin).hostname.replace(/^www\./, "");
+    return domain ? `\n\n@${domain} #${codeSlot}` : "";
+  } catch {
+    return "";
+  }
+}
+
 function isCredentialFailure(code: string, detail: string): boolean {
   return code === "401" || code === "102" || /invalid key|authentication failed/i.test(detail);
 }
@@ -171,7 +186,7 @@ async function arkeselGenerate(phone: string): Promise<OtpRequestResult> {
     length: 6,
     medium: "sms",
     // Arkesel replaces this slot with the code it generated.
-    message: "MechNow code: %otp_code%. Valid %expiry% mins. Never share it.",
+    message: `MechNow code: %otp_code%. Valid %expiry% mins. Never share it.${otpAnnotation("%otp_code%")}`,
     number: arkeselNumber(phone),
     sender_id: senderId,
     type: "numeric",
@@ -194,7 +209,7 @@ async function arkeselLegacySms(phone: string, code: string): Promise<string> {
   if (!apiKey) throw smsNotConfigured();
 
   const expiry = Math.min(10, Math.max(1, Math.trunc(config.otpTtlMinutes) || 5));
-  const message = `MechNow: your verification code is ${code}. It expires in ${expiry} minutes. Never share this code.`;
+  const message = `MechNow: your verification code is ${code}. It expires in ${expiry} minutes. Never share this code.${otpAnnotation(code)}`;
   const url = new URL("https://sms.arkesel.com/sms/api");
   url.searchParams.set("action", "send-sms");
   url.searchParams.set("api_key", apiKey);
@@ -247,7 +262,7 @@ export async function deliverOtp(phone: string, code?: string): Promise<OtpReque
   if (config.smsProvider === "console") {
     if (isProduction) throw smsNotConfigured();
     if (!code) throw new Error("Local OTP delivery requires a generated code.");
-    const body = `MechNow: your verification code is ${code}. It expires in ${config.otpTtlMinutes} minutes. Never share this code.`;
+    const body = `MechNow: your verification code is ${code}. It expires in ${config.otpTtlMinutes} minutes. Never share this code.${otpAnnotation(code)}`;
     // eslint-disable-next-line no-console
     console.log(`[sms:console] to=${phone} body="${body}"`);
     return { providerRef: `console-${Date.now()}`, managed: false, devCode: code };

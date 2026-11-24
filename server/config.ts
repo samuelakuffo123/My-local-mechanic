@@ -18,11 +18,11 @@ const configuredOrigins = (process.env.CORS_ORIGINS ?? "http://localhost:8443,ht
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
-const platformOrigin =
+const publicOrigin =
   process.env.PUBLIC_ORIGIN?.trim() ||
   process.env.RENDER_EXTERNAL_URL?.trim() ||
   (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}` : "");
-const corsOrigins = [...new Set([...configuredOrigins, platformOrigin].filter(Boolean))];
+const corsOrigins = [...new Set([...configuredOrigins, publicOrigin].filter(Boolean))];
 
 // Arkesel caps OTP expiry at 10 minutes. Keep the local expiry in step so a
 // delayed SMS is still usable when it finally reaches the phone.
@@ -53,6 +53,8 @@ export const config = {
 
   // Comma-separated list of allowed browser origins.
   corsOrigins,
+  // Used for domain-bound SMS OTP autofill; no scheme, just the hostname.
+  publicOrigin,
 
   // Only trust X-Forwarded-For when a reverse proxy you control sets it.
   trustProxy: process.env.TRUST_PROXY === "true",

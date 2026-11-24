@@ -39,6 +39,14 @@ type PendingOtp = {
 
 const PENDING_KEY = "mechnow:otp-pending";
 
+interface OtpCredentialLike {
+  code?: string;
+}
+
+interface OtpCredentialsContainer {
+  get(options: { otp: { transport: string[] }; signal: AbortSignal }): Promise<OtpCredentialLike | null>;
+}
+
 function readPendingOtp(): PendingOtp | null {
   try {
     return JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? "null") as PendingOtp | null;
@@ -107,6 +115,8 @@ export function AuthPlaceholder() {
   const [role, setRole] = useState<Role>(seed?.role ?? "driver");
   const [otpPhone, setOtpPhone] = useState(seed?.phone ?? "");
   const [digits, setDigits] = useState<string[]>(emptyDigits);
+  const [otpAutofilled, setOtpAutofilled] = useState(false);
+  const [otpRequestId, setOtpRequestId] = useState(0);
   const [devCode, setDevCode] = useState<string | null>(seed?.devCode ?? null);
   const [resendIn, setResendIn] = useState(RESEND_SECONDS);
   const [busy, setBusy] = useState(false);
@@ -116,6 +126,7 @@ export function AuthPlaceholder() {
   const [googleNotice, setGoogleNotice] = useState<string | null>(null);
   const [smsFailed, setSmsFailed] = useState(false);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const otpListenerRef = useRef<AbortController | null>(null);
   const phoneInputRef = useRef<HTMLInputElement | null>(null);
 
   const code = digits.join("");
@@ -149,6 +160,33 @@ export function AuthPlaceholder() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [view]);
+
+  // WebOTP fills the code automatically on supported HTTPS browsers. The
+  // `autocomplete="one-time-code"` input still covers Safari/iOS, which uses
+  // the same domain-bound SMS format without exposing this API.
+  useEffect(() => {
+    if (view !== "verify" || !window.isSecureContext || !("OTPCredential" in window)) return;
+    const credentials = navigator.credentials as unknown as OtpCredentialsContainer | undefined;
+    if (!credentials?.get) return;
+    const controller = new AbortController();
+    otpListenerRef.current = controller;
+    let active = true;
+    void credentials
+      .get({ otp: { transport: ["sms"] }, signal: controller.signal })
+      .then((credential) => {
+        const otp = credential?.code ?? "";
+        if (!active || !/^\d{6}$/.test(otp)) return;
+        setDigits(otp.split(""));
+        setOtpAutofilled(true);
+        setError(null);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      controller.abort();
+      if (otpListenerRef.current === controller) otpListenerRef.current = null;
+    };
+  }, [view, otpRequestId]);
 
   const verifyTarget = otpPhone || phone;
 
@@ -216,6 +254,7 @@ export function AuthPlaceholder() {
       setOtpPhone(target);
       setDevCode(null);
       setDigits(emptyDigits());
+      setOtpAutofilled(false);
       setResendIn(RESEND_SECONDS);
       setSmsFailed(false);
       navigate("/verify", { state: pending });
@@ -233,6 +272,8 @@ export function AuthPlaceholder() {
           // Storage unavailable; the router state below still carries the flow.
         }
         setDevCode(result.devCode ?? null);
+        setOtpAutofilled(false);
+        setOtpRequestId((value) => value + 1);
         setResendIn(RESEND_SECONDS);
         setSmsFailed(false);
         if (!advance) navigate("/verify", { state: sent, replace: true });
@@ -271,6 +312,7 @@ export function AuthPlaceholder() {
 
   const verify = () =>
     run(async () => {
+      otpListenerRef.current?.abort();
       const target = otpPhone || canonicalPhone(phone);
       if (!target || code.length !== OTP_LENGTH) return;
       const session = await authService.verifyOtp({
@@ -342,7 +384,15 @@ export function AuthPlaceholder() {
 
   const writeDigits = (next: string[]) => {
     setDigits(next);
+    setOtpAutofilled(false);
     setError(null);
+  };
+
+  const enterManually = () => {
+    otpListenerRef.current?.abort();
+    setDigits(emptyDigits());
+    setOtpAutofilled(false);
+    window.setTimeout(() => otpRefs.current[0]?.focus(), 0);
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -456,6 +506,15 @@ export function AuthPlaceholder() {
                 ))}
               </div>
             </fieldset>
+
+            {otpAutofilled && (
+              <div className="au-autofill" role="status">
+                <span>Code filled from your messages.</span>
+                <button className="au-link au-link--inline" onClick={enterManually} type="button">
+                  Enter manually
+                </button>
+              </div>
+            )}
 
             <button aria-busy={busy || sendingCode} className="au-button au-button--primary" disabled={busy || sendingCode || code.length !== OTP_LENGTH} type="submit">
               {busy || sendingCode ? <LoaderCircle className="au-spinner" size={18} /> : null}

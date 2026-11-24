@@ -401,6 +401,20 @@
   font-size: 13px;
 }
 
+.au-autofill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--auth-border);
+  border-radius: 10px;
+  background: rgba(79, 70, 229, 0.04);
+  color: var(--auth-muted);
+  font-size: 13px;
+}
+
 .au-confirm-number {
   padding: 18px 12px;
   border: 1.5px solid var(--auth-border);
