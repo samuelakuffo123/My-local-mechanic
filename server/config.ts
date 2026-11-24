@@ -56,10 +56,11 @@ export const config = {
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY ?? "",
   paystackWebhookSecret: process.env.PAYSTACK_WEBHOOK_SECRET ?? "",
 
-  // SMS provider boundary. "console" logs codes locally; wire a real Ghanaian
-  // SMS/WhatsApp provider before production.
+  // SMS provider boundary. "console" logs codes locally; "arkesel" sends real
+  // SMS through Ghana's Arkesel gateway.
   smsProvider: process.env.SMS_PROVIDER ?? "console",
   smsSenderId: process.env.SMS_SENDER_ID ?? "MechNow",
+  arkeselApiKey: process.env.ARKESEL_API_KEY ?? "",
 
   // Google Identity Services token model. The web client ID is public by
   // design; no client secret is required because access tokens are verified

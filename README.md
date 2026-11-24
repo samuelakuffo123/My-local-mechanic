@@ -33,7 +33,7 @@ cloudflared tunnel --url http://localhost:8443
 
 Open the printed `https://….trycloudflare.com` address on the phone, then choose **Install app** (Android) or **Share → Add to Home Screen** (iPhone). The quick-tunnel address changes whenever the tunnel restarts, and the installed app only works while the laptop, the API and the tunnel stay running.
 
-For a permanent public deployment, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The repository includes a Render Blueprint that serves the built client and `/api` from one HTTPS origin with a persistent disk for SQLite. The frontend must be served from the site root because its manifest and service worker use `/` paths, and the database must stay on persistent storage. The development OTP/SMS and payment adapters are not production-ready by themselves; the deployment guide lists the required providers and remaining gaps.
+For a permanent public deployment, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The repository includes a Render Blueprint that serves the built client and `/api` from one HTTPS origin, with production data in Neon Postgres. The frontend must be served from the site root because its manifest and service worker use `/` paths. Local development shows the OTP on screen; production phone sign-in uses the Arkesel SMS adapter, and the deployment guide lists the required credentials and remaining gaps.
 
 ## Mapbox pickup maps
 
@@ -82,4 +82,4 @@ Run API integration tests with `npm run test:api`; create a production client bu
 
 ## Current integration limits
 
-The provider catalog is sample data and the parts catalog starts empty; provider onboarding, driver phone/SMS verification, email delivery, realtime messaging, and a real payment processor are not configured. Payment intents remain `pending` and do not charge anyone. Do not treat demo provider availability, ratings, prices, or contact details as verified.
+The provider catalog is sample data and the parts catalog starts empty; provider onboarding, email delivery, realtime messaging, and a real payment processor are not configured. Driver phone verification works in production once `ARKESEL_API_KEY` is set; locally the code is shown on the verify screen. Payment intents remain `pending` and do not charge anyone. Do not treat demo provider availability, ratings, prices, or contact details as verified.

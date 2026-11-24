@@ -120,7 +120,9 @@ Add the same URL to Google's authorized origins and Mapbox's URL restrictions.
 | `PAYMENTS_PROVIDER=paystack` | live payments | Enables the Paystack adapter |
 | `PAYSTACK_SECRET_KEY` | live payments | Charge/refund API |
 | `PAYSTACK_WEBHOOK_SECRET` | live payments | Webhook HMAC verification |
-| `SMS_PROVIDER` | phone signup in production | **No real adapter exists yet** |
+| `SMS_PROVIDER=arkesel` | phone signup in production | Enables the Ghana SMS adapter |
+| `ARKESEL_API_KEY` | with Arkesel | API key from the Arkesel dashboard |
+| `SMS_SENDER_ID` | optional | Sender name shown to users; register it with Arkesel |
 
 Set the Paystack webhook URL to
 `https://<service>.onrender.com/api/payments/webhook/paystack`.
@@ -129,10 +131,11 @@ Set the Paystack webhook URL to
 
 These fail loudly rather than pretending to work:
 
-1. **Phone OTP/signup.** `server/sms.ts` only ships a console adapter and throws
-   in production. Google sign-in works without it. To enable phone accounts,
-   add an adapter (Arkesel, Hubtel, Twilio, or WhatsApp Cloud API) and set
-   `SMS_PROVIDER`.
+1. **Phone OTP/signup.** Production now uses the Arkesel adapter in
+   `server/sms.ts`. Create a free Arkesel account, generate an API key, register
+   the `MechNow` sender ID, and set `SMS_PROVIDER=arkesel` plus
+   `ARKESEL_API_KEY`. Free test credits are enough to verify the flow; real
+   public signups need paid credits. Google sign-in works without SMS.
 2. **Payments.** The development adapter is hard-disabled in production. Live
    payments need Paystack keys and a verified webhook.
 3. **Demo map data.** `SEED_DEMO_DATA` is refused in production, so the nearby

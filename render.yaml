@@ -74,3 +74,11 @@ services:
         sync: false
       - key: PAYSTACK_WEBHOOK_SECRET
         sync: false
+      # Phone OTP delivery through Arkesel. Free signup includes test credits;
+      # register the sender ID before sending to real customers.
+      - key: SMS_PROVIDER
+        value: arkesel
+      - key: ARKESEL_API_KEY
+        sync: false
+      - key: SMS_SENDER_ID
+        value: MechNow
