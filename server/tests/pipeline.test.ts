@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = ":memory:";
+// Never let a developer's local .env SMS credentials reach the test suite.
+process.env.SMS_PROVIDER = "console";
 process.env.ALLOW_DEV_PAYMENTS = "true";
 process.env.PAYMENTS_PROVIDER = "dev";
 

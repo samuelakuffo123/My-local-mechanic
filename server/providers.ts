@@ -18,10 +18,14 @@ export interface ProviderProfile {
   status: ProviderStatus;
   available: boolean;
   rating: number;
+  reviewCount: number;
   reliability: number;
   lat: number | null;
   lng: number | null;
   address: string | null;
+  bio: string | null;
+  yearsExperience: number;
+  safetyNote: string | null;
 }
 
 /** A verified provider that can be placed on the discovery map. */

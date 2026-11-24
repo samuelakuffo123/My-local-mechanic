@@ -63,6 +63,8 @@ h3 { font-size: 15px; line-height: 1.35; }
 .welcome .eyebrow { color: #739bff; margin-bottom: 7px; }
 .welcome h1 { max-width: 330px; }
 .welcome > p:last-child { margin-top: 9px; color: var(--text-2); font-size: 13px; }
+.welcome-name-link { display: inline-flex; align-items: center; gap: 3px; margin-top: 7px; padding: 0; border: 0; background: none; color: var(--brand-cyan); font-size: 12px; font-weight: 700; cursor: pointer; }
+.welcome-name-link:hover { text-decoration: underline; }
 .vehicle-card { background: linear-gradient(140deg, #172341, #121722 65%); border: 1px solid #263961; border-radius: 20px; overflow: hidden; box-shadow: var(--shadow-1); }
 .vehicle-card__top { padding: 13px 15px 2px; display: flex; justify-content: space-between; align-items: center; }
 .vehicle-card__body { display: flex; align-items: center; gap: 15px; padding: 7px 15px 15px; }

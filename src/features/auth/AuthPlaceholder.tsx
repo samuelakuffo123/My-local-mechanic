@@ -5,12 +5,18 @@ import { useAppStore } from "../../state/store";
 import { authService, type GoogleConfig } from "../../services/auth";
 import { preloadGoogleIdentity, requestGoogleAccessToken } from "../../services/googleIdentity";
 import { errorMessage } from "../../services/errorMessage";
+import { ApiError } from "../../services/mockApi";
 import { completeProfileSetup, needsProfileSetup } from "../onboarding/onboardingState";
 import type { Role, User } from "../../state/types";
 import "./auth.css";
 
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 30;
+
+function isSmsDeliveryError(error: unknown): boolean {
+  return error instanceof ApiError &&
+    (error.code === "sms_provider_failed" || error.code === "sms_unconfigured");
+}
 
 const ROLES: { value: Role; label: string }[] = [
   { value: "driver", label: "Vehicle owner" },
@@ -98,6 +104,7 @@ export function AuthPlaceholder() {
   const [error, setError] = useState<string | null>(null);
   const [googleConfig, setGoogleConfig] = useState<GoogleConfig | null>(null);
   const [googleNotice, setGoogleNotice] = useState<string | null>(null);
+  const [smsFailed, setSmsFailed] = useState(false);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   const code = digits.join("");
@@ -169,24 +176,31 @@ export function AuthPlaceholder() {
 
   const sendCode = (target: string, flow: AuthMode) =>
     run(async () => {
-      const result = await authService.requestOtp(target);
-      const pending: PendingOtp = {
-        phone: target,
-        name: name.trim() || undefined,
-        role,
-        devCode: result.devCode,
-        mode: flow,
-      };
       try {
-        sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
-      } catch {
-        // Storage unavailable; the router state below still carries the flow.
+        const result = await authService.requestOtp(target);
+        const pending: PendingOtp = {
+          phone: target,
+          name: name.trim() || undefined,
+          role,
+          devCode: result.devCode,
+          mode: flow,
+        };
+        try {
+          sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+        } catch {
+          // Storage unavailable; the router state below still carries the flow.
+        }
+        setOtpPhone(target);
+        setDevCode(result.devCode ?? null);
+        setDigits(emptyDigits());
+        setResendIn(RESEND_SECONDS);
+        setSmsFailed(false);
+        navigate("/verify", { state: pending });
+      } catch (caught) {
+        // Surface a Google alternative when the SMS gateway itself is down.
+        setSmsFailed(isSmsDeliveryError(caught));
+        throw caught;
       }
-      setOtpPhone(target);
-      setDevCode(result.devCode ?? null);
-      setDigits(emptyDigits());
-      setResendIn(RESEND_SECONDS);
-      navigate("/verify", { state: pending });
     });
 
   const requestCode = () => {
@@ -238,6 +252,36 @@ export function AuthPlaceholder() {
         throw caught;
       }
     });
+
+  const googleButton = (
+    <>
+      <div className="au-divider"><span>or</span></div>
+      <button aria-busy={busy} className="au-button au-button--google" disabled={busy || googleConfig === null} onClick={() => void googleSignIn()} type="button">
+        {busy ? (
+          <LoaderCircle className="au-spinner" size={18} />
+        ) : (
+          <svg aria-hidden="true" viewBox="0 0 48 48">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5Z" />
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.73 7.18l7.65 5.94c4.46-4.13 7.12-10.2 7.12-17.59Z" />
+            <path fill="#FBBC05" d="M10.53 28.59a14.4 14.4 0 0 1 0-9.18l-7.98-6.19a23.9 23.9 0 0 0 0 21.56l7.98-6.19Z" />
+            <path fill="#34A853" d="M24 48c6.47 0 11.91-2.13 15.88-5.81l-7.65-5.94c-2.13 1.43-4.85 2.28-8.23 2.28-6.26 0-11.57-4.22-13.46-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48Z" />
+          </svg>
+        )}
+        Continue with Google
+      </button>
+
+      {smsFailed && (
+        <p className="au-google-notice" role="status">
+          SMS delivery isn't working right now. You can sign in with Google instead.
+        </p>
+      )}
+      {googleNotice && (
+        <p className="au-google-notice" role="status">
+          {googleNotice}
+        </p>
+      )}
+    </>
+  );
 
   const writeDigits = (next: string[]) => {
     setDigits(next);
@@ -360,6 +404,8 @@ export function AuthPlaceholder() {
                 Change number
               </button>
             </div>
+
+            {googleButton}
           </form>
         ) : (
           <form
@@ -449,27 +495,7 @@ export function AuthPlaceholder() {
               Secure sign-in. We'll never share your number.
             </p>
 
-            <div className="au-divider"><span>or</span></div>
-
-            <button aria-busy={busy} className="au-button au-button--google" disabled={busy || googleConfig === null} onClick={() => void googleSignIn()} type="button">
-              {busy ? (
-                <LoaderCircle className="au-spinner" size={18} />
-              ) : (
-                <svg aria-hidden="true" viewBox="0 0 48 48">
-                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5Z" />
-                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.73 7.18l7.65 5.94c4.46-4.13 7.12-10.2 7.12-17.59Z" />
-                  <path fill="#FBBC05" d="M10.53 28.59a14.4 14.4 0 0 1 0-9.18l-7.98-6.19a23.9 23.9 0 0 0 0 21.56l7.98-6.19Z" />
-                  <path fill="#34A853" d="M24 48c6.47 0 11.91-2.13 15.88-5.81l-7.65-5.94c-2.13 1.43-4.85 2.28-8.23 2.28-6.26 0-11.57-4.22-13.46-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48Z" />
-                </svg>
-              )}
-              Continue with Google
-            </button>
-
-            {googleNotice && (
-              <p className="au-google-notice" role="status">
-                {googleNotice}
-              </p>
-            )}
+            {googleButton}
 
             <footer className="au-footer">
               <p>

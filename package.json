@@ -8,11 +8,11 @@
     "api": "node server/index.ts",
     "server": "node server/index.ts",
     "start": "node server/index.ts",
-    "test:api": "node --test \"server/tests/**/*.test.ts\"",
+    "test:api": "node --test --test-concurrency=1 \"server/tests/**/*.test.ts\"",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt",
-    "server:test": "node --test \"server/tests/**/*.test.ts\""
+    "server:test": "node --test --test-concurrency=1 \"server/tests/**/*.test.ts\""
   },
   "engines": {
     "node": ">=24"

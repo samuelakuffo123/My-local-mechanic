@@ -1,8 +1,8 @@
 import { randomInt } from "node:crypto";
 import { config } from "./config.ts";
 import { all, get, run, tx } from "./db.ts";
-import { forbidden, tooMany, unauthorized, badRequest } from "./errors.ts";
-import { sendOtp } from "./sms.ts";
+import { AppError, forbidden, tooMany, unauthorized, badRequest } from "./errors.ts";
+import { deliverOtp, providerManagesOtp, verifyProviderOtp, PROVIDER_OTP_INVALID } from "./sms.ts";
 import { auditFrom } from "./audit.ts";
 import {
   addHours,
@@ -53,15 +53,21 @@ export async function requestOtp(rawPhone: string, ip: string): Promise<{ devCod
   if (!rateLimit(`otp:phone:${phone}`, 5, 15 * 60_000)) throw tooMany("Too many codes requested for this number. Try again later.");
   if (!rateLimit(`otp:ip:${ip}`, 20, 60 * 60_000)) throw tooMany("Too many codes requested. Try again later.");
 
-  const code = String(randomInt(100000, 999999));
+  // Arkesel's OTP API generates the code itself; the console adapter keeps the
+  // existing locally generated code for development and tests.
+  const managed = providerManagesOtp();
+  const code = managed ? undefined : String(randomInt(100000, 999999));
+  const delivery = await deliverOtp(phone, code);
   const expiresAt = addMinutes(new Date(), config.otpTtlMinutes).toISOString();
+  // Provider-managed OTPs have no local plaintext code. Bind the record to the
+  // gateway reference so it cannot be replayed after a successful verification.
+  const codeHash = managed ? sha256(`${phone}:${delivery.providerRef}`) : otpHash(phone, code as string);
   await run(
     `INSERT INTO otp_codes (id, phone, code_hash, attempts, expires_at, consumed_at, created_at) VALUES (?, ?, ?, 0, ?, NULL, ?)`,
-    [newId(), phone, otpHash(phone, code), expiresAt, nowIso()],
+    [newId(), phone, codeHash, expiresAt, nowIso()],
   );
 
-  const result = await sendOtp(phone, code);
-  const devCode = config.env === "production" ? undefined : result.devCode;
+  const devCode = config.env === "production" ? undefined : delivery.devCode;
   return { devCode, expiresAt };
 }
 
@@ -80,7 +86,18 @@ export async function verifyOtp(rawPhone: string, code: string, options: { name?
   if (record.consumed_at) throw badRequest("That code has already been used.");
   if (new Date(record.expires_at).getTime() <= Date.now()) throw badRequest("That code has expired. Request a new one.");
   if (record.attempts >= config.otpMaxAttempts) throw tooMany("Too many incorrect attempts. Request a new code.");
-  if (!safeEqual(record.code_hash, otpHash(phone, code))) {
+  if (providerManagesOtp()) {
+    try {
+      await verifyProviderOtp(phone, code);
+    } catch (caught) {
+      // Count wrong codes against the local attempt limit, but do not punish
+      // the user for a provider outage or an expired code.
+      if (caught instanceof AppError && caught.code === PROVIDER_OTP_INVALID) {
+        await run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
+      }
+      throw caught;
+    }
+  } else if (!safeEqual(record.code_hash, otpHash(phone, code))) {
     await run("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?", [record.id]);
     throw badRequest("That code is incorrect.");
   }
@@ -122,6 +139,8 @@ interface GoogleTokenInfo {
   email?: unknown;
   email_verified?: unknown;
   name?: unknown;
+  given_name?: unknown;
+  family_name?: unknown;
 }
 
 interface GoogleIdentity {
@@ -134,10 +153,18 @@ function isVerifiedEmail(value: unknown): boolean {
   return value === true || value === "true";
 }
 
-function displayNameFrom(value: unknown, email: string): string {
-  if (typeof value === "string" && value.trim()) return value.trim().slice(0, 80);
-  const localPart = email.split("@")[0].replace(/[._-]+/g, " ").trim();
-  return localPart ? localPart.slice(0, 80) : "MechNow customer";
+function displayNameFrom(info: GoogleTokenInfo, email: string): string {
+  const clean = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 80) : "");
+  const given = clean(info.given_name);
+  const family = clean(info.family_name);
+  const full = clean(info.name);
+  if (given && family) return `${given} ${family}`.slice(0, 80);
+  if (given) return given;
+  if (full) return full;
+  // Never fall back to the email local part: it is not a person's name and
+  // looks like an email address in the home greeting.
+  void email;
+  return "MechNow driver";
 }
 
 async function verifyGoogleAccessToken(accessToken: string): Promise<GoogleIdentity> {
@@ -191,7 +218,7 @@ async function verifyGoogleAccessToken(accessToken: string): Promise<GoogleIdent
     throw unauthorized("That Google sign-in could not be verified.");
   }
 
-  return { subject, email, name: displayNameFrom(info.name, email) };
+  return { subject, email, name: displayNameFrom(info, email) };
 }
 
 /** Verifies a Google access token, links the account, then issues a MechNow session. */

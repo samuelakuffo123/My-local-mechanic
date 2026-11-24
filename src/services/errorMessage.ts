@@ -23,6 +23,13 @@ export function errorMessage(error: unknown, fallback: string): string {
     if (error.status === 413) return "That request is too large. Try again with less information.";
     if (error.status === 415) return "This app sent an unsupported request format. Please try again.";
     if (error.status === 429) return "Too many attempts. Wait a moment, then try again.";
+    // 502/503 errors carry deliberately safe, user-facing copy from the API
+    // (for example an SMS provider outage). Keep it so the message is useful.
+    if (error.status === 502 || error.status === 503) {
+      const message = presentable(error.message) ? error.message : fallback;
+      const reference = error.requestId ? ` Reference: ${error.requestId.slice(0, 8)}.` : "";
+      return `${message}${reference}`;
+    }
     if (error.status >= 500) {
       const reference = error.requestId ? ` Reference: ${error.requestId.slice(0, 8)}.` : "";
       return `${fallback}${reference}`;

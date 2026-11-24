@@ -82,4 +82,4 @@ Run API integration tests with `npm run test:api`; create a production client bu
 
 ## Current integration limits
 
-The provider catalog is sample data and the parts catalog starts empty; provider onboarding, email delivery, realtime messaging, and a real payment processor are not configured. Driver phone verification works in production once `ARKESEL_API_KEY` is set; locally the code is shown on the verify screen. Payment intents remain `pending` and do not charge anyone. Do not treat demo provider availability, ratings, prices, or contact details as verified.
+The provider catalog is sample data and the parts catalog starts empty; provider onboarding, email delivery, realtime messaging, and a real payment processor are not configured. Driver phone verification works in production once `ARKESEL_API_KEY` is set to the Arkesel **Main SMS API Key** (OTP rejects Multiple API Keys); locally the code is shown on the verify screen. Payment intents remain `pending` and do not charge anyone. Do not treat demo provider availability, ratings, prices, or contact details as verified.

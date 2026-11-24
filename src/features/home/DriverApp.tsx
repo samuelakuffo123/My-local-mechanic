@@ -70,6 +70,7 @@ import { useGeolocation, type GeoPoint } from "../../hooks/useGeolocation";
 import { useNearbyProviders } from "../../hooks/useNearbyProviders";
 import { getDrivingRoute } from "../../services/directions";
 import { errorMessage } from "../../services/errorMessage";
+import { displayFirstName, displayName, isPlaceholderName } from "../../utils/displayName";
 
 // The emergency walkthrough is a scripted UI state machine. As it progresses we
 // mirror the meaningful stages onto a persisted service request so the job is
@@ -441,7 +442,8 @@ function HomeScreen({
   const navigate = useNavigate();
   const user = useAppStore((state) => state.user);
   const vehicle = useAppStore((state) => state.activeVehicle);
-  const firstName = user?.name.split(" ")[0] ?? "there";
+  const firstName = displayFirstName(user);
+  const needsName = isPlaceholderName(user?.name);
   const geo = useGeolocation({ immediate: true });
   const nearby = useNearbyProviders(geo.point ? { lat: geo.point.lat, lng: geo.point.lng } : null);
   const [activeRequest, setActiveRequest] = useState<ServiceRequest | null>(null);
@@ -479,7 +481,7 @@ function HomeScreen({
           <div className="header-actions">
             <IconButton label="Notifications" icon={Bell} />
             <button aria-label="Open profile" className="avatar-button" onClick={onProfile} type="button">
-              <UserAvatar avatarUrl={user?.avatarUrl} name={user?.name} />
+              <UserAvatar avatarUrl={user?.avatarUrl} name={displayName(user, "MechNow driver")} />
             </button>
           </div>
         }
@@ -498,6 +500,11 @@ function HomeScreen({
                   ? `Your ${vehicle.model} is in good shape. Help is one tap away.`
                   : "Add a vehicle to get personalised maintenance guidance."}
           </p>
+          {needsName && (
+            <button className="welcome-name-link" onClick={onProfile} type="button">
+              Add your name so we can greet you properly <ChevronRight size={14} />
+            </button>
+          )}
         </section>
 
         {activeRequest && (
@@ -668,7 +675,7 @@ function ProfilePanelSheet({
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const updateProfile = useAppStore((state) => state.updateProfile);
-  const [name, setName] = useState(user?.name ?? "");
+  const [name, setName] = useState(isPlaceholderName(user?.name) ? "" : user?.name ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
   const [avatarDraft, setAvatarDraft] = useState<string | null | undefined>(undefined);
   const [processingPhoto, setProcessingPhoto] = useState(false);
@@ -772,7 +779,7 @@ function ProfilePanelSheet({
         {panel === "personal" && (
           <>
             <div className="profile-photo-editor">
-              <UserAvatar avatarUrl={previewAvatarUrl} className="avatar--large" name={user?.name} />
+              <UserAvatar avatarUrl={previewAvatarUrl} className="avatar--large" name={displayName(user, "MechNow driver")} />
               <div className="profile-photo-editor__copy">
                 <strong>Profile photo</strong>
                 <small>JPG, PNG or WebP · resized automatically</small>
@@ -947,8 +954,8 @@ function ProfileScreen({
       <AppHeader title="Profile" trailing={<IconButton icon={Settings} label="Profile settings" onClick={() => setPanel("personal")} />} />
       <main className="profile-content">
         <section className="profile-identity">
-          <UserAvatar avatarUrl={user?.avatarUrl} className="avatar--large" name={user?.name} />
-          <div><span className="overline">VEHICLE OWNER</span><h1>{user?.name ?? "MechNow driver"}</h1><p>{user?.phone ?? "No phone number"}</p></div>
+          <UserAvatar avatarUrl={user?.avatarUrl} className="avatar--large" name={displayName(user, "MechNow driver")} />
+          <div><span className="overline">VEHICLE OWNER</span><h1>{displayName(user, "MechNow driver")}</h1><p>{user?.phone ?? "No phone number"}</p></div>
           <button aria-label="Edit personal information" onClick={() => setPanel("personal")} type="button"><ChevronRight size={19} /></button>
         </section>
         <section className="profile-completeness">

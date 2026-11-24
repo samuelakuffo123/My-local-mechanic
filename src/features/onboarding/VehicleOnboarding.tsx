@@ -13,6 +13,7 @@ import tyrePhoto from "../../assets/tyre.jpg"
 
 import { errorMessage } from "../../services/errorMessage"
 import { vehicleService } from "../../services/vehicles"
+import { displayFirstName } from "../../utils/displayName"
 
 import { useAppStore } from "../../state/store"
 import { completeProfileSetup } from "./onboardingState"
@@ -234,7 +235,7 @@ export function VehicleOnboarding() {
           <SkipForward size={15} /> I’ll do this later
         </button>
         <p className="vehicle-onboarding__welcome">
-          Welcome, {user?.name.split(" ")[0] ?? "driver"} · Your vehicle details stay private.
+          Welcome, {displayFirstName(user, "driver")} · Your vehicle details stay private.
         </p>
       </main>
     </AppLayout>

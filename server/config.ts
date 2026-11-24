@@ -24,6 +24,11 @@ const platformOrigin =
   (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}` : "");
 const corsOrigins = [...new Set([...configuredOrigins, platformOrigin].filter(Boolean))];
 
+/** Environment values are untrusted input too; strip copy/paste whitespace. */
+export function trimmedEnv(value: string | undefined): string {
+  return value?.trim() ?? "";
+}
+
 export const config = {
   env: process.env.NODE_ENV ?? "development",
   // Render/Railway inject PORT; API_PORT stays supported for local runs.
@@ -58,9 +63,11 @@ export const config = {
 
   // SMS provider boundary. "console" logs codes locally; "arkesel" sends real
   // SMS through Ghana's Arkesel gateway.
-  smsProvider: process.env.SMS_PROVIDER ?? "console",
-  smsSenderId: process.env.SMS_SENDER_ID ?? "MechNow",
-  arkeselApiKey: process.env.ARKESEL_API_KEY ?? "",
+  smsProvider: trimmedEnv(process.env.SMS_PROVIDER) || "console",
+  smsSenderId: trimmedEnv(process.env.SMS_SENDER_ID) || "MechNow",
+  // Copy/pasted secrets often pick up whitespace. Trim at the boundary so a
+  // valid key is not rejected before Arkesel ever sees it.
+  arkeselApiKey: trimmedEnv(process.env.ARKESEL_API_KEY),
 
   // Google Identity Services token model. The web client ID is public by
   // design; no client secret is required because access tokens are verified

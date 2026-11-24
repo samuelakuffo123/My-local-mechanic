@@ -10,6 +10,8 @@ import { createHmac } from "node:crypto";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = ":memory:";
+// Never let a developer's local .env SMS credentials reach the test suite.
+process.env.SMS_PROVIDER = "console";
 // Exercise the Paystack webhook path in isolation: no charge is created, only
 // signature verification is asserted.
 process.env.PAYMENTS_PROVIDER = "paystack";

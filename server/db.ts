@@ -355,6 +355,43 @@ const migrations: { version: number; name: string; sql: string }[] = [
       ALTER TABLE service_requests ADD COLUMN provider_location_at TEXT;
     `,
   },
+  {
+    version: 5,
+    name: "reviews_and_safety",
+    sql: `
+      ALTER TABLE providers ADD COLUMN bio TEXT;
+      ALTER TABLE providers ADD COLUMN years_experience INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE providers ADD COLUMN safety_note TEXT;
+      ALTER TABLE providers ADD COLUMN review_count INTEGER NOT NULL DEFAULT 0;
+
+      CREATE TABLE reviews (
+        id TEXT PRIMARY KEY,
+        provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+        request_id TEXT UNIQUE REFERENCES service_requests(id) ON DELETE SET NULL,
+        customer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+        comment TEXT,
+        tags TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published', 'hidden')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_reviews_provider ON reviews(provider_id, status, created_at);
+      CREATE INDEX idx_reviews_customer ON reviews(customer_id);
+
+      CREATE TABLE safety_reports (
+        id TEXT PRIMARY KEY,
+        reporter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider_id TEXT REFERENCES providers(id) ON DELETE SET NULL,
+        request_id TEXT REFERENCES service_requests(id) ON DELETE SET NULL,
+        reason TEXT NOT NULL,
+        details TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'investigating', 'resolved', 'dismissed')),
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_safety_reports_status ON safety_reports(status, created_at);
+    `,
+  },
 ];
 
 function migrateSqlite(handle: DatabaseSync) {

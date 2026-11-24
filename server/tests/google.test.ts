@@ -5,6 +5,8 @@ import { createServer } from "node:http";
 process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = ":memory:";
 process.env.GOOGLE_CLIENT_ID = "mechnow-test-client.apps.googleusercontent.com";
+// Never let a developer's local .env SMS credentials reach the test suite.
+process.env.SMS_PROVIDER = "console";
 
 test("Google sign-in verifies tokens, links emails, and issues MechNow sessions", async () => {
   const clientId = process.env.GOOGLE_CLIENT_ID!;
